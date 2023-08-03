@@ -1,0 +1,4 @@
+{
+    "java.compile.nullAnalysis.mode": "automatic",
+    "shiftleft-core.slHomePath": "/home/codespace/.shiftleft"
+}
