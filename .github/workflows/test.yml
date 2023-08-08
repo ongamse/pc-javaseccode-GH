@@ -26,10 +26,9 @@ jobs:
         curl https://cdn.shiftleft.io/download/sl > ${GITHUB_WORKSPACE}/sl && chmod a+rx ${GITHUB_WORKSPACE}/sl
     # ShiftLeft requires Java 1.8. Post the package step override the version
     - name: Setup Java JDK
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v1.4.3
       with:
-        distribution: zulu
-        java-version: 8
+        java-version: 1.8
     - name: Extract branch name
       shell: bash
       run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
