@@ -136,41 +136,44 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/ps/vuln?username=joychou' or 'a'='a">http://localhost:8080/sqli/jdbc/ps/vuln?username=joychou' or 'a'='a</a>
      */
     @RequestMapping("/jdbc/ps/vuln")
-    public String jdbc_ps_vuln(@RequestParam("username") String username) {
+	@RequestMapping("/jdbc/ps/fixed")
+	public String jdbc_ps_fixed(@RequestParam("username") String username) {
 
-        StringBuilder result = new StringBuilder();
-        try {
-            Class.forName(driver);
-            Connection con = DriverManager.getConnection(url, user, password);
+		StringBuilder result = new StringBuilder();
+		try {
+			Class.forName(driver);
+			Connection con = DriverManager.getConnection(url, user, password);
 
-            if (!con.isClosed())
-                System.out.println("Connecting to Database successfully.");
+			if (!con.isClosed())
+				System.out.println("Connecting to Database successfully.");
 
-            String sql = "select * from users where username = '" + username + "'";
-            PreparedStatement st = con.prepareStatement(sql);
+			// Use parameterized queries to avoid SQL injection
+			String sql = "SELECT * FROM users WHERE username = ?";
+			PreparedStatement st = con.prepareStatement(sql);
+			st.setString(1, username); // Set the username parameter
 
-            logger.info(st.toString());
-            ResultSet rs = st.executeQuery();
+			logger.info(st.toString());
+			ResultSet rs = st.executeQuery();
 
-            while (rs.next()) {
-                String res_name = rs.getString("username");
-                String res_pwd = rs.getString("password");
-                String info = String.format("%s: %s\n", res_name, res_pwd);
-                result.append(info);
-                logger.info(info);
-            }
+			while (rs.next()) {
+				String res_name = rs.getString("username");
+				String res_pwd = rs.getString("password");
+				String info = String.format("%s: %s\n", res_name, res_pwd);
+				result.append(info);
+				logger.info(info);
+			}
 
-            rs.close();
-            con.close();
+			rs.close();
+			con.close();
 
-        } catch (ClassNotFoundException e) {
-            logger.error("Sorry, can't find the Driver!");
-            e.printStackTrace();
-        } catch (SQLException e) {
-            logger.error(e.toString());
-        }
-        return result.toString();
-    }
+		} catch (ClassNotFoundException e) {
+			logger.error("Sorry, can't find the Driver!");
+			e.printStackTrace();
+		} catch (SQLException e) {
+			logger.error(e.toString());
+		}
+		return result.toString();
+	}
 
 
     /**
@@ -243,3 +246,4 @@ public class SQLI {
     }
 
 }
+
