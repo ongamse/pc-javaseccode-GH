@@ -115,23 +115,67 @@ public class SSRF {
      * <a href="http://localhost:8080/ssrf/openStream?url=file:///etc/passwd">http://localhost:8080/ssrf/openStream?url=file:///etc/passwd</a>
 
      */
-    @GetMapping("/openStream")
+	@GetMapping("/openStream")
     public void openStream(@RequestParam String url, HttpServletResponse response) throws IOException {
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {
-            String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
-            // download
-            response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
-
+            // Validate the URL before processing
             URL u = new URL(url);
-            int length;
-            byte[] bytes = new byte[1024];
-            inputStream = u.openStream(); // send request
+            String fileName = u.getFile();
+            String downLoadImgFileName = FilenameUtils.getName(fileName);
+            
+            // Set the content-disposition header with a safe filename
+            response.setHeader("content-disposition", "attachment;filename=\"" + downLoadImgFileName + "\"");
+
+            inputStream = u.openStream();
             outputStream = response.getOutputStream();
-            while ((length = inputStream.read(bytes)) > 0) {
-                outputStream.write(bytes, 0, length);
+            byte[] buffer = new byte[1024];
+            int length;
+            while ((length = inputStream.read(buffer)) > 0) {
+                outputStream.write(buffer, 0, length);
             }
+        } catch (MalformedURLException e) {
+            // Handle invalid URLs
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid URL: " + url);
+        } catch (IOException e) {
+            // Handle IO errors
+            logger.error("Error downloading file: ", e);
+            response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Error downloading file");
+        } finally {
+            // Ensure resources are closed
+            if (inputStream != null) {
+                inputStream.close();
+            }
+            if (outputStream != null) {
+                outputStream.close();
+            }
+        }
+    }
+
+
+        } catch (MalformedURLException e) {
+            logger.error("Invalid URL: " + e.toString());
+        } catch (IOException e) {
+            logger.error("I/O error: " + e.toString());
+        } finally {
+            if (inputStream != null) {
+                try {
+                    inputStream.close();
+                } catch (IOException e) {
+                    logger.error("Error closing input stream: " + e.toString());
+                }
+            }
+            if (outputStream != null) {
+                try {
+                    outputStream.close();
+                } catch (IOException e) {
+                    logger.error("Error closing output stream: " + e.toString());
+                }
+            }
+        }
+    }
+
 
         } catch (Exception e) {
             logger.error(e.toString());
@@ -316,3 +360,5 @@ public class SSRF {
 
 
 }
+
+

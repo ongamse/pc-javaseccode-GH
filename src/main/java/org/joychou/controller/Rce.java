@@ -28,28 +28,38 @@ import java.sql.DriverManager;
 @RequestMapping("/rce")
 public class Rce {
 
-    @GetMapping("/runtime/exec")
-    public String CommandExec(String cmd) {
-        Runtime run = Runtime.getRuntime();
-        StringBuilder sb = new StringBuilder();
+	@GetMapping("/runtime/exec")
+	public String CommandExec(String cmd) {
+	    if (!isValidCommand(cmd)) {
+	        throw new IllegalArgumentException("Invalid command");
+	    }
+	    Runtime run = Runtime.getRuntime();
+	    StringBuilder sb = new StringBuilder();
+	    try {
+	        Process p = run.exec(cmd);
+	        BufferedInputStream in = new BufferedInputStream(p.getInputStream());
+	        BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
+	        String tmpStr;
+	        while ((tmpStr = inBr.readLine()) != null) {
+	            sb.append(tmpStr);
+	        }
+	        if (p.waitFor() != 0) {
+	            if (p.exitValue() == 1) return "Command exec failed!! ";
+	        }
+	        inBr.close();
+	        in.close();
+	    } catch (Exception e) {
+	        return e.toString();
+	    }
+	    return sb.toString();
+	}
 
-        try {
-            Process p = run.exec(cmd);
-            BufferedInputStream in = new BufferedInputStream(p.getInputStream());
-            BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
-            String tmpStr;
+	private boolean isValidCommand(String cmd) {
+	    // Implement your own logic to validate the command
+	    // For example, check if the command contains any dangerous characters
+	    return !cmd.contains(";") && !cmd.contains("|") && !cmd.contains("`");
+	}
 
-            while ((tmpStr = inBr.readLine()) != null) {
-                sb.append(tmpStr);
-            }
-
-            if (p.waitFor() != 0) {
-                if (p.exitValue() == 1)
-                    return "Command exec failed!!";
-            }
-
-            inBr.close();
-            in.close();
         } catch (Exception e) {
             return e.toString();
         }
@@ -136,4 +146,5 @@ public class Rce {
         Runtime.getRuntime().exec("touch /tmp/x");
     }
 }
+
 
