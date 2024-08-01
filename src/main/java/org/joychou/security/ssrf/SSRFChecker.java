@@ -174,9 +174,28 @@ public class SSRFChecker {
      */
 	public static String host2ip(String host) {
 
-        if (null == host || host.isEmpty()) {
-            return "";
-        }
+	    if (null == host || host.isEmpty()) {
+	        return "";
+	    }
+
+	    // Whitelist of valid hostnames
+	    Set<String> validHosts = new HashSet<>(Arrays.asList("localhost", "example.com", "api.example.com"));
+
+	    if (!validHosts.contains(host)) {
+	        logger.error("Invalid hostname: " + host);
+	        return "";
+	    }
+
+	    try {
+	        // send dns request
+	        InetAddress IpAddress = InetAddress.getByName(host);
+	        return IpAddress.getHostAddress();
+	    } catch (Exception e) {
+	        logger.error("host2ip exception " + e.getMessage());
+	        return "";
+	    }
+	}
+
 
         // Whitelist of allowed domain names
         Set<String> allowedDomains = new HashSet<>(Arrays.asList("example.com", "allowed.domain"));
@@ -321,4 +340,5 @@ public class SSRFChecker {
     }
 
 }
+
 
