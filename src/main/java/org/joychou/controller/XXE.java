@@ -234,31 +234,13 @@ public class XXE {
      * Use request.getInputStream to support UTF16 encoding.
      */
     @RequestMapping(value = "/DocumentBuilder/vuln", method = RequestMethod.POST)
-    public String DocumentBuilderVuln(HttpServletRequest request) {
-        try {
-            DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-            DocumentBuilder db = dbf.newDocumentBuilder();
-            InputSource is = new InputSource(request.getInputStream());
-            Document document = db.parse(is);  // parse xml
-
-            // 遍历xml节点name和value
-            StringBuilder buf = new StringBuilder();
-            NodeList rootNodeList = document.getChildNodes();
-            for (int i = 0; i < rootNodeList.getLength(); i++) {
-                Node rootNode = rootNodeList.item(i);
-                NodeList child = rootNode.getChildNodes();
-                for (int j = 0; j < child.getLength(); j++) {
-                    Node node = child.item(j);
-                    buf.append(String.format("%s: %s\n", node.getNodeName(), node.getTextContent()));
-                }
-            }
-            return buf.toString();
-        } catch (Exception e) {
-            e.printStackTrace();
-            logger.error(e.toString());
-            return e.toString();
-        }
-    }
+	DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+	dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+	dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+	dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+	DocumentBuilder db = dbf.newDocumentBuilder();
+	InputSource is = new InputSource(request.getInputStream());
+	Document document = db.parse(is);  // parse xml
 
     @RequestMapping(value = "/DocumentBuilder/Sec", method = RequestMethod.POST)
     public String DocumentBuilderSec(HttpServletRequest request) {
