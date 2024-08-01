@@ -115,16 +115,20 @@ public class SSRF {
      * <a href="http://localhost:8080/ssrf/openStream?url=file:///etc/passwd">http://localhost:8080/ssrf/openStream?url=file:///etc/passwd</a>
 
      */
-    @GetMapping("/openStream")
+	@GetMapping("/openStream")
     public void openStream(@RequestParam String url, HttpServletResponse response) throws IOException {
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {
-            String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
+            // Validate the URL before using it
+            URL u = new URL(url);
+            String fileName = new File(u.getFile()).getName();
+            int dotIndex = fileName.lastIndexOf('.');
+            String downLoadImgFileName = dotIndex == -1 ? fileName : fileName.substring(0, dotIndex);
+            
             // download
             response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
 
-            URL u = new URL(url);
             int length;
             byte[] bytes = new byte[1024];
             inputStream = u.openStream(); // send request
@@ -132,6 +136,29 @@ public class SSRF {
             while ((length = inputStream.read(bytes)) > 0) {
                 outputStream.write(bytes, 0, length);
             }
+
+        } catch (MalformedURLException e) {
+            logger.error("Invalid URL: " + e.toString());
+        } catch (IOException e) {
+            logger.error("I/O error: " + e.toString());
+        } finally {
+            if (inputStream != null) {
+                try {
+                    inputStream.close();
+                } catch (IOException e) {
+                    logger.error("Error closing input stream: " + e.toString());
+                }
+            }
+            if (outputStream != null) {
+                try {
+                    outputStream.close();
+                } catch (IOException e) {
+                    logger.error("Error closing output stream: " + e.toString());
+                }
+            }
+        }
+    }
+
 
         } catch (Exception e) {
             logger.error(e.toString());
@@ -316,3 +343,4 @@ public class SSRF {
 
 
 }
+
