@@ -140,12 +140,16 @@ public class FileUpload {
         }
 
 
-        try {
-            // Get the file and save it somewhere
-            byte[] bytes = multifile.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + multifile.getOriginalFilename());
-            Files.write(path, bytes);
-        } catch (IOException e) {
+	try {
+	    byte[] bytes = multifile.getBytes();
+	    Path path = Paths.get(UPLOADED_FOLDER + safeFileName);
+	    Files.write(path, bytes);
+	} catch (IOException e) {
+	    logger.error(e.toString());
+	    deleteFile(filePath);
+	    return "Upload failed";
+	}
+
             logger.error(e.toString());
             deleteFile(filePath);
             return "Upload failed";
@@ -198,4 +202,5 @@ public class FileUpload {
         return bi != null;
     }
 }
+
 
