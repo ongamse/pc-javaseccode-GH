@@ -296,18 +296,17 @@ public class XXE {
         try {
             String body = WebUtils.getRequestBody(request);
             logger.info(body);
-            DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+	DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+	dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+	dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+	dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+	dbf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+	dbf.setXIncludeAware(false);   // Disable XInclude processing
+	dbf.setNamespaceAware(false);  // Disable namespace awareness
+	DocumentBuilder db = dbf.newDocumentBuilder();
+	InputSource is = new InputSource(new StringReader(body));
+	Document document = db.parse(is);  // parse xml
 
-            dbf.setXIncludeAware(true);   // 支持XInclude
-            dbf.setNamespaceAware(true);  // 支持XInclude
-            dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
-            dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
-
-            DocumentBuilder db = dbf.newDocumentBuilder();
-            StringReader sr = new StringReader(body);
-            InputSource is = new InputSource(sr);
-            Document document = db.parse(is);  // parse xml
 
             NodeList rootNodeList = document.getChildNodes();
             response(rootNodeList);
@@ -423,3 +422,4 @@ public class XXE {
     }
 
 }
+
