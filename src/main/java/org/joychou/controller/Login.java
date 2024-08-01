@@ -25,6 +25,7 @@ public class Login {
     }
 
     @GetMapping("/logout")
+	@GetMapping("/logout")
     public String logoutPage(HttpServletRequest request, HttpServletResponse response) {
 
         String username = request.getUserPrincipal().getName();
@@ -42,13 +43,8 @@ public class Login {
             response.addCookie(cookie);
         }
 
-        if (null == request.getUserPrincipal()) {
-            logger.info("USER " + username + " LOGOUT SUCCESS.");
-        } else {
-            logger.info("User " + username + " logout failed. Please try again.");
-        }
-
         return "redirect:/login?logout";
     }
 
 }
+
