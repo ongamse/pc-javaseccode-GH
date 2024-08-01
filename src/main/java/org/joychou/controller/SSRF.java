@@ -120,22 +120,39 @@ public class SSRF {
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {
-            // Validate the URL before using it
+            // Validate the URL before processing
             URL u = new URL(url);
-            String fileName = new File(u.getFile()).getName();
-            int dotIndex = fileName.lastIndexOf('.');
-            String downLoadImgFileName = dotIndex == -1 ? fileName : fileName.substring(0, dotIndex);
+            String fileName = u.getFile();
+            String downLoadImgFileName = FilenameUtils.getName(fileName);
             
-            // download
-            response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
+            // Set the content-disposition header with a safe filename
+            response.setHeader("content-disposition", "attachment;filename=\"" + downLoadImgFileName + "\"");
 
-            int length;
-            byte[] bytes = new byte[1024];
-            inputStream = u.openStream(); // send request
+            inputStream = u.openStream();
             outputStream = response.getOutputStream();
-            while ((length = inputStream.read(bytes)) > 0) {
-                outputStream.write(bytes, 0, length);
+            byte[] buffer = new byte[1024];
+            int length;
+            while ((length = inputStream.read(buffer)) > 0) {
+                outputStream.write(buffer, 0, length);
             }
+        } catch (MalformedURLException e) {
+            // Handle invalid URLs
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid URL: " + url);
+        } catch (IOException e) {
+            // Handle IO errors
+            logger.error("Error downloading file: ", e);
+            response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Error downloading file");
+        } finally {
+            // Ensure resources are closed
+            if (inputStream != null) {
+                inputStream.close();
+            }
+            if (outputStream != null) {
+                outputStream.close();
+            }
+        }
+    }
+
 
         } catch (MalformedURLException e) {
             logger.error("Invalid URL: " + e.toString());
@@ -343,4 +360,5 @@ public class SSRF {
 
 
 }
+
 
