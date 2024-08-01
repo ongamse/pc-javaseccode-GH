@@ -35,16 +35,22 @@ public class PathTraversal {
         return getImgBase64(filepath);
     }
 
-    private String getImgBase64(String imgFile) throws IOException {
+	private String getImgBase64(String imgFile) throws IOException {
+		logger.info("Working directory: " + System.getProperty("user.dir"));
+		logger.info("File path: " + imgFile);
 
-        logger.info("Working directory: " + System.getProperty("user.dir"));
-        logger.info("File path: " + imgFile);
+		// Resolve the file path using Path
+		Path resolvedPath = Paths.get(imgFile).normalize();
+		File f = new File(resolvedPath.toString());
 
-        File f = new File(imgFile);
-        if (f.exists() && !f.isDirectory()) {
-            byte[] data = Files.readAllBytes(Paths.get(imgFile));
-            return new String(Base64.encodeBase64(data));
-        } else {
+		if (f.exists() && !f.isDirectory()) {
+			byte[] data = Files.readAllBytes(resolvedPath);
+			return new String(Base64.encodeBase64(data));
+		} else {
+			return "File doesn't exist or is not a file.";
+		}
+	}
+
             return "File doesn't exist or is not a file.";
         }
     }
