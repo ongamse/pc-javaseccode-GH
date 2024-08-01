@@ -48,6 +48,7 @@ public class FileUpload {
     }
 
     @PostMapping("/upload")
+	@PostMapping("/upload")
     public String singleFileUpload(@RequestParam("file") MultipartFile file,
                                    RedirectAttributes redirectAttributes) {
         if (file.isEmpty()) {
@@ -59,11 +60,12 @@ public class FileUpload {
         try {
             // Get the file and save it somewhere
             byte[] bytes = file.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + file.getOriginalFilename());
-            Files.write(path, bytes);
+            // Use Apache Commons IO to prevent directory traversal attacks
+            File safeFile = new File(UPLOADED_FOLDER, FilenameUtils.getName(file.getOriginalFilename()));
+            FileUtils.writeByteArrayToFile(safeFile, bytes);
 
             redirectAttributes.addFlashAttribute("message",
-                    "You successfully uploaded '" + UPLOADED_FOLDER + file.getOriginalFilename() + "'");
+                    "You successfully uploaded '" + safeFile.getAbsolutePath() + "'");
 
         } catch (IOException e) {
             redirectAttributes.addFlashAttribute("message", "upload failed");
@@ -196,3 +198,4 @@ public class FileUpload {
         return bi != null;
     }
 }
+
