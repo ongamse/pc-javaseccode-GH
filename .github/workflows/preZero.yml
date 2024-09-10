@@ -37,7 +37,7 @@ jobs:
     - name: NextGen Static Analysis
       run: ${GITHUB_WORKSPACE}/sl analyze --strict --wait --app QwietAI-java_sec_code-GH --tag branch=${{ github.head_ref || steps.extract_branch.outputs.branch }} --vcs-prefix-correction "io/shiftleft=src/main/java/" 
       env:
-        SHIFTLEFT_ACCESS_TOKEN: ${{ secrets.SHIFTLEFT_ACCESS_TOKEN }}
+        SHIFTLEFT_ACCESS_TOKEN: ${{ secrets.SHIFTLEFT_ACCESS_TOKEN_POC }}
         SHIFTLEFT_API_HOST: www.shiftleft.io
         SHIFTLEFT_GRPC_TELEMETRY_HOST: telemetry.shiftleft.io:443
         SHIFTLEFT_GRPC_API_HOST: api.shiftleft.io:443
