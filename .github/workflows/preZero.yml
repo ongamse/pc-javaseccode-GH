@@ -24,12 +24,12 @@ jobs:
     - name: Download preZero CLI
       run: |
         curl https://cdn.shiftleft.io/download/sl > ${GITHUB_WORKSPACE}/sl && chmod a+rx ${GITHUB_WORKSPACE}/sl
-    # ShiftLeft requires Java 1.8. Post the package step override the version
+    # QwietAI requires Java. Post the package step override the version
     - name: Setup Java JDK
       uses: actions/setup-java@v3
       with:
         distribution: zulu
-        java-version: 8
+        java-version: 11
     - name: Extract branch name
       shell: bash
       run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
