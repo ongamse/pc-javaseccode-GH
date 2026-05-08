@@ -1,0 +1,69 @@
+pipeline:
+  name: JavaSecCode
+  identifier: JavaSecCode
+  projectIdentifier: magman
+  orgIdentifier: sandbox
+  tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: ONGAMSE
+        repoName: pc-javaseccode-GH
+        build: <+input>
+  stages:
+    - stage:
+        name: Build
+        identifier: Build
+        description: ""
+        type: CI
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            override: false
+          buildIntelligence:
+            enabled: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec:
+              size: small
+              imageSpec:
+                imageName: ubuntu-latest
+          execution:
+            steps:
+              - step:
+                  type: HarnessSAST
+                  name: Harness Code
+                  identifier: Harness_Code
+                  spec:
+                    mode: orchestration
+                    config: sast_sca
+                    target:
+                      type: repository
+                      detection: auto
+                    advanced:
+                      log:
+                        level: debug
+                      args:
+                        cli: "--container 18fgsa/s3-resource"
+              - step:
+                  type: HarnessSCA
+                  name: Harness Container
+                  identifier: Harness_Container
+                  spec:
+                    mode: orchestration
+                    config: default
+                    target:
+                      type: container
+                      detection: auto
+                    advanced:
+                      log:
+                        level: debug
+                    privileged: true
+                    image:
+                      type: docker_v2
+                      tag: latest
+                      name: 18fgsa/s3-resource
