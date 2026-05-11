@@ -38,46 +38,47 @@ pipeline:
                   name: Harness SAST-SCA
                   identifier: Harness_SASTSCA
                   steps:
-                    - step:
-                        type: HarnessSAST
-                        name: Harness Code
-                        identifier: Harness_Code
-                        spec:
-                          mode: orchestration
-                          config: sast_sca
-                          target:
-                            type: repository
-                            detection: auto
-                          advanced:
-                            log:
-                              level: debug
-                            args:
-                              cli: "--container 18fgsa/s3-resource"
-                        enforce:
-                          policySets:
-                            - Fail_on_Reachable_Findings
-                    - step:
-                        type: HarnessSCA
-                        name: Harness Container
-                        identifier: Harness_Container
-                        spec:
-                          mode: orchestration
-                          config: default
-                          target:
-                            type: container
-                            detection: auto
-                          advanced:
-                            log:
-                              level: debug
-                          privileged: true
-                          image:
-                            type: docker_v2
-                            tag: latest
-                            name: 18fgsa/s3-resource
-                        enforce:
-                          policySets:
-                            - Fail_on_High_EPSS
-                      contextType: Pipeline
+                    - parallel:
+                        - step:
+                            type: HarnessSAST
+                            name: Harness Code
+                            identifier: Harness_Code
+                            spec:
+                              mode: orchestration
+                              config: sast_sca
+                              target:
+                                type: repository
+                                detection: auto
+                              advanced:
+                                log:
+                                  level: debug
+                                args:
+                                  cli: "--container 18fgsa/s3-resource"
+                            enforce:
+                              policySets:
+                                - Fail_on_Reachable_Findings
+                        - step:
+                            type: HarnessSCA
+                            name: Harness Container
+                            identifier: Harness_Container
+                            spec:
+                              mode: orchestration
+                              config: default
+                              target:
+                                type: container
+                                detection: auto
+                              advanced:
+                                log:
+                                  level: debug
+                              privileged: true
+                              image:
+                                type: docker_v2
+                                tag: latest
+                                name: 18fgsa/s3-resource
+                            enforce:
+                              policySets:
+                                - Fail_on_High_EPSS
+                          contextType: Pipeline
               - stepGroup:
                   name: Supply Chain
                   identifier: Supply_Chain
