@@ -51,9 +51,7 @@ pipeline:
                         cli: "--container 18fgsa/s3-resource"
                   enforce:
                     policySets:
-                      - account.Block_on_Reachables
-                      - Fail_on_Reachability
-                      - org.Reachables
+                      - Fail_on_Reachable_Findings
               - step:
                   type: HarnessSCA
                   name: Harness Container
