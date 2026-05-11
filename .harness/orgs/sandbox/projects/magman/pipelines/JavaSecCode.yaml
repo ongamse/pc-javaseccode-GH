@@ -49,6 +49,9 @@ pipeline:
                         level: debug
                       args:
                         cli: "--container 18fgsa/s3-resource"
+                  enforce:
+                    policySets:
+                      - account.FailCriticals
               - step:
                   type: HarnessSCA
                   name: Harness Container
