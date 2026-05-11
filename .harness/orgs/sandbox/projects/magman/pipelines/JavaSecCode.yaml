@@ -70,3 +70,6 @@ pipeline:
                       type: docker_v2
                       tag: latest
                       name: 18fgsa/s3-resource
+                  enforce:
+                    policySets:
+                      - Fail_on_High_EPSS
