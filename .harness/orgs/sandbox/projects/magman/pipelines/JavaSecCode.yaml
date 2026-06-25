@@ -34,6 +34,13 @@ pipeline:
                 imageName: ubuntu-latest
           execution:
             steps:
+              - step:
+                  type: Run
+                  name: Maven
+                  identifier: Maven
+                  spec:
+                    shell: Sh
+                    command: maven build
               - stepGroup:
                   name: Harness SAST-SCA
                   identifier: Harness_SASTSCA
