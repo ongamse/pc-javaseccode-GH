@@ -40,7 +40,7 @@ pipeline:
                   identifier: Maven
                   spec:
                     shell: Sh
-                    command: maven build
+                    command: mvn compile package
               - stepGroup:
                   name: Harness SAST-SCA
                   identifier: Harness_SASTSCA
