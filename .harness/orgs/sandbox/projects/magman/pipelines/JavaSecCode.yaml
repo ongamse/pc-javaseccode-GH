@@ -86,28 +86,6 @@ pipeline:
                               policySets:
                                 - Fail_on_High_EPSS
                           contextType: Pipeline
-              - step:
-                  type: Agent
-                  name: Triage
-                  identifier: Triage
-                  spec:
-                    agentName: triageAgent
-                    agentSettings:
-                      execution_id: <+pipeline.executionId>
-                      account_id: <+account.identifier>
-                      org_id: <+org.identifier>
-                      project_id: <+project.identifier>
-                      scan_id: ""
-                      target_id: ""
-                      scan_types: ""
-                      severity_types: Critical
-                      exclude_repo_patterns: ""
-                      exclude_artifact_patterns: ""
-                      mcp_connectors: []
-                      max_occurrences: "0"
-                      additional_instructions: ""
-                      llm_connector: account.harnessOpenAI
-                contextType: Pipeline
               - stepGroup:
                   name: Supply Chain
                   identifier: Supply_Chain
