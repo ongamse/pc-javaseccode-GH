@@ -2,6 +2,8 @@ package org.joychou.controller;
 
 import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
+import org.codehaus.groovy.control.CompilerConfiguration;
+import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,8 +21,10 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.sql.DriverManager;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 
 /**
@@ -42,6 +46,15 @@ public class Rce {
     private static final Set<String> ALLOWED_SCRIPT_HOSTS = Set.of(
             "trusted.example.com"
     );
+
+    // Allowlist pattern for safe Groovy expressions: only simple arithmetic and string literals.
+    // Permits digits, basic arithmetic operators, parentheses, whitespace, and quoted strings.
+    private static final Pattern GROOVY_ALLOWLIST_PATTERN = Pattern.compile(
+            "^[\\d\\s+\\-*/%().\"'a-zA-Z_]+$"
+    );
+
+    // Maximum length for Groovy input to prevent denial-of-service via large payloads
+    private static final int GROOVY_MAX_INPUT_LENGTH = 500;
 
     @GetMapping("/runtime/exec")
     public String CommandExec(String cmd) {
@@ -185,13 +198,48 @@ public class Rce {
     }
 
     /**
-     * http://localhost:8080/rce/groovy?content="open -a Calculator".execute()
-     * @param content groovy shell
+     * http://localhost:8080/rce/groovy?content=2+2
+     * @param content groovy expression (restricted to safe arithmetic/string operations)
      */
     @GetMapping("groovy")
-    public void groovyshell(String content) {
-        GroovyShell groovyShell = new GroovyShell();
-        groovyShell.evaluate(content);
+    public String groovyshell(String content) {
+        if (content == null || content.isEmpty()) {
+            return "Input must not be empty";
+        }
+
+        if (content.length() > GROOVY_MAX_INPUT_LENGTH) {
+            return "Input too long";
+        }
+
+        // Allowlist validation: reject anything that is not a simple expression
+        if (!GROOVY_ALLOWLIST_PATTERN.matcher(content).matches()) {
+            return "Input contains disallowed characters or patterns";
+        }
+
+        // Defense-in-depth: configure a SecureASTCustomizer that blocks dangerous constructs
+        SecureASTCustomizer secureAst = new SecureASTCustomizer();
+        secureAst.setClosuresAllowed(false);
+        secureAst.setMethodDefinitionAllowed(false);
+        secureAst.setImportsWhitelist(Collections.emptyList());
+        secureAst.setStaticImportsWhitelist(Collections.emptyList());
+        secureAst.setStaticStarImportsWhitelist(Collections.emptyList());
+        secureAst.setReceiversClassesWhiteList(Arrays.asList(
+                Math.class, Integer.class, Long.class, Double.class,
+                Float.class, String.class, Object.class
+        ));
+
+        CompilerConfiguration config = new CompilerConfiguration();
+        config.addCompilationCustomizers(secureAst);
+
+        GroovyShell groovyShell = new GroovyShell(config);
+        try {
+            Object result = groovyShell.evaluate(content);
+            return result != null ? result.toString() : "";
+        } catch (SecurityException e) {
+            return "Expression rejected by security policy";
+        } catch (Exception e) {
+            return "Evaluation error: " + e.getMessage();
+        }
     }
 
 
