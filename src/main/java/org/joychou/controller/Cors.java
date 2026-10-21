@@ -33,9 +33,15 @@ public class Cors {
     }
 
     @GetMapping("/vuln/setHeader")
-    public String vuls2(HttpServletResponse response) {
-        // 后端设置Access-Control-Allow-Origin为*的情况下，跨域的时候前端如果设置withCredentials为true会异常
-        response.setHeader("Access-Control-Allow-Origin", "*");
+    public String vuls2(HttpServletRequest request, HttpServletResponse response) {
+        String origin = request.getHeader("Origin");
+        if (origin != null) {
+            String validatedOrigin = SecurityUtil.checkURL(origin);
+            if (validatedOrigin != null) {
+                response.setHeader("Access-Control-Allow-Origin", validatedOrigin);
+                response.setHeader("Access-Control-Allow-Credentials", "true");
+            }
+        }
         return info;
     }
 
