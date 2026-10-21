@@ -22,11 +22,21 @@ public class CRLFInjection {
     @RequestMapping("/safecode")
     @ResponseBody
     public void crlf(HttpServletRequest request, HttpServletResponse response) {
-        response.addHeader("test1", SecurityUtil.stripCRLF(request.getParameter("test1")));
-        response.setHeader("test2", SecurityUtil.stripCRLF(request.getParameter("test2")));
-        String author = SecurityUtil.stripCRLF(request.getParameter("test3"));
-        Cookie cookie = new Cookie("test3", author);
-        cookie.setSecure(true);
-        response.addCookie(cookie);
+        String test1 = request.getParameter("test1");
+        String test2 = request.getParameter("test2");
+        String test3 = request.getParameter("test3");
+
+        if (test1 != null && test1.length() <= 1024) {
+            response.addHeader("test1", SecurityUtil.stripCRLF(test1));
+        }
+        if (test2 != null && test2.length() <= 1024) {
+            response.setHeader("test2", SecurityUtil.stripCRLF(test2));
+        }
+        if (test3 != null && test3.length() <= 1024) {
+            String author = SecurityUtil.stripCRLF(test3);
+            Cookie cookie = new Cookie("test3", author);
+            cookie.setSecure(true);
+            response.addCookie(cookie);
+        }
     }
 }

@@ -21,9 +21,8 @@ public class LoginFailureHandler implements AuthenticationFailureHandler {
                                         HttpServletResponse response, AuthenticationException exception)
                                         throws ServletException, IOException {
 
-        logger.info("Login failed. " + request.getRequestURL() +
-                " username: " + request.getParameter("username") +
-                " password: " + request.getParameter("password") );
+        String username = SecurityUtil.sanitizeForLog(request.getParameter("username"), 255);
+        logger.info("Login failed. {} username: {}", request.getRequestURL(), username);
 
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.getWriter().write("{\"code\":1, \"message\":\"Login failed.\"}");

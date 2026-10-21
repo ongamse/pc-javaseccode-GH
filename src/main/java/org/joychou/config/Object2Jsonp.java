@@ -64,6 +64,8 @@ public class Object2Jsonp extends AbstractJsonpResponseBodyAdvice {
         for (String callback: this.callbacks) {
             reqCallback = req.getParameter(callback);
             if(StringUtils.isNotBlank(reqCallback)) {
+                // Validate callback against allowlist pattern
+                reqCallback = SecurityUtil.validateJsonpCallback(reqCallback);
                 break;
             }
         }
@@ -75,7 +77,7 @@ public class Object2Jsonp extends AbstractJsonpResponseBodyAdvice {
 
         String refer = request.getHeader("referer");
         String url = request.getRequestURL().toString();
-        String query = request.getQueryString();
+        String query = SecurityUtil.sanitizeForLog(request.getQueryString(), 1024);
 
         // 如果jsonp校验的开关为false，不校验
         if ( !WebConfig.getJsonpReferCheckEnabled() ) {

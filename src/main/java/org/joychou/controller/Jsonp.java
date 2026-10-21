@@ -45,7 +45,11 @@ public class Jsonp {
     @RequestMapping(value = "/vuln/referer", produces = "application/javascript")
     public String referer(HttpServletRequest request) {
         String callback = request.getParameter(this.callback);
-        return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
+        String safeCallback = SecurityUtil.validateJsonpCallback(callback);
+        if (safeCallback == null) {
+            return "{\"error\": \"invalid callback\"}";
+        }
+        return WebUtils.json2Jsonp(safeCallback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
     /**
@@ -62,7 +66,11 @@ public class Jsonp {
             return "error";
         }
         String callback = request.getParameter(this.callback);
-        return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
+        String safeCallback = SecurityUtil.validateJsonpCallback(callback);
+        if (safeCallback == null) {
+            return "{\"error\": \"invalid callback\"}";
+        }
+        return WebUtils.json2Jsonp(safeCallback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
     /**
@@ -107,7 +115,11 @@ public class Jsonp {
             return "error";
         }
         String callback = request.getParameter(this.callback);
-        return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
+        String safeCallback = SecurityUtil.validateJsonpCallback(callback);
+        if (safeCallback == null) {
+            return "{\"error\": \"invalid callback\"}";
+        }
+        return WebUtils.json2Jsonp(safeCallback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
     /**
@@ -130,8 +142,9 @@ public class Jsonp {
         CsrfToken csrfToken = cookieCsrfTokenRepository.loadToken(request); // get csrf token
 
         String callback = request.getParameter("fastjsonpCallback");
-        if (StringUtils.isNotBlank(callback)) {
-            JSONPObject jsonpObj = new JSONPObject(callback);
+        String safeCallback = SecurityUtil.validateJsonpCallback(callback);
+        if (StringUtils.isNotBlank(safeCallback)) {
+            JSONPObject jsonpObj = new JSONPObject(safeCallback);
             jsonpObj.addParameter(csrfToken);
             return jsonpObj.toString();
         } else {

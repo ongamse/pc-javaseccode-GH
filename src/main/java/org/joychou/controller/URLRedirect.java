@@ -30,7 +30,11 @@ public class URLRedirect {
      */
     @GetMapping("/redirect")
     public String redirect(@RequestParam("url") String url) {
-        return "redirect:" + url;
+        String safeUrl = SecurityUtil.checkURL(url);
+        if (safeUrl == null) {
+            return "redirect:/error";
+        }
+        return "redirect:" + safeUrl;
     }
 
 
@@ -41,8 +45,18 @@ public class URLRedirect {
     @ResponseBody
     public static void setHeader(HttpServletRequest request, HttpServletResponse response) {
         String url = SecurityUtil.stripCRLF(request.getParameter("url"));
+        String safeUrl = SecurityUtil.checkURL(url);
+        if (safeUrl == null) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            try {
+                response.getWriter().write("url forbidden");
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            return;
+        }
         response.setStatus(HttpServletResponse.SC_MOVED_PERMANENTLY); // 301 redirect
-        response.setHeader("Location", url);
+        response.setHeader("Location", safeUrl);
     }
 
 
@@ -53,6 +67,11 @@ public class URLRedirect {
     @ResponseBody
     public static void sendRedirect(HttpServletRequest request, HttpServletResponse response) throws IOException {
         String url = request.getParameter("url");
+        if (url == null || url.isEmpty() || !SecurityUtil.isHttp(url)) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.getWriter().write("url forbidden");
+            return;
+        }
         String safeUrl = SecurityUtil.checkURL(url);
         if (safeUrl == null) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
@@ -99,7 +118,17 @@ public class URLRedirect {
             return false;
         }
 
+        // Enforce a maximum length to prevent abuse
+        if (path.length() > 255) {
+            return false;
+        }
+
         if (!path.startsWith("/")) {
+            return false;
+        }
+
+        // Only allow safe characters in forward paths
+        if (!path.matches("^[a-zA-Z0-9/_\\-.]+$")) {
             return false;
         }
 

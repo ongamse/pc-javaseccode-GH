@@ -18,6 +18,8 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern JSONP_CALLBACK_PATTERN = Pattern.compile("^[a-zA-Z_$][a-zA-Z0-9_$.]{0,127}$");
+    private static final Pattern WEBSOCKET_PATH_PATTERN = Pattern.compile("^/[a-zA-Z0-9/_-]{1,127}$");
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -260,6 +262,84 @@ public class SecurityUtil {
             return null;
         }
         return input.replaceAll("[\\r\\n]", "");
+    }
+
+    /**
+     * Validate JSONP callback parameter against an allowlist pattern.
+     * Only allows valid JavaScript identifier characters: alphanumeric, underscore, dollar, dot.
+     *
+     * @param callback the callback parameter value
+     * @return validated callback or null if invalid
+     */
+    public static String validateJsonpCallback(String callback) {
+        if (callback == null || callback.isEmpty()) {
+            return null;
+        }
+        if (!JSONP_CALLBACK_PATTERN.matcher(callback).matches()) {
+            return null;
+        }
+        return callback;
+    }
+
+    /**
+     * Validate a WebSocket path to prevent injection of arbitrary endpoint paths.
+     * Only allows paths starting with / followed by alphanumeric, underscore, hyphen, slash.
+     *
+     * @param path the websocket path
+     * @return validated path or null if invalid
+     */
+    public static String validateWebSocketPath(String path) {
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        if (!WEBSOCKET_PATH_PATTERN.matcher(path).matches()) {
+            return null;
+        }
+        return path;
+    }
+
+    /**
+     * Validate a URL parameter: must be non-null, non-empty, and use http or https scheme.
+     *
+     * @param url the URL to validate
+     * @return validated URL or null if invalid
+     */
+    public static String validateUrl(String url) {
+        if (url == null || url.isEmpty()) {
+            return null;
+        }
+        if (!isHttp(url)) {
+            return null;
+        }
+        // Reject URLs with CRLF characters
+        if (url.contains("\r") || url.contains("\n")) {
+            return null;
+        }
+        try {
+            new URI(url);
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return url;
+    }
+
+    /**
+     * Sanitize a request parameter for safe inclusion in log messages.
+     * Strips CRLF to prevent log injection and truncates to a maximum length.
+     *
+     * @param input the raw input
+     * @param maxLength maximum allowed length
+     * @return sanitized string or empty string if input is null
+     */
+    public static String sanitizeForLog(String input, int maxLength) {
+        if (input == null) {
+            return "";
+        }
+        String sanitized = input.replaceAll("[\\r\\n]", "");
+        if (sanitized.length() > maxLength) {
+            sanitized = sanitized.substring(0, maxLength);
+        }
+        return sanitized;
     }
 
     public static void main(String[] args) {
