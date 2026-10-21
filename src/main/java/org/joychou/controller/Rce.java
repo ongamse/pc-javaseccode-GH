@@ -45,11 +45,22 @@ public class Rce {
 
     @GetMapping("/runtime/exec")
     public String CommandExec(String cmd) {
-        Runtime run = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder();
 
         try {
-            Process p = run.exec(cmd);
+            // Parse user input into tokens; validate command against allowlist
+            String[] tokens = cmd.trim().split("\\s+");
+            String command = tokens[0];
+
+            if (!ALLOWED_COMMANDS.contains(command)) {
+                return "Command not allowed. Permitted commands: " + ALLOWED_COMMANDS;
+            }
+
+            // Use ProcessBuilder with argv array (no shell) to prevent injection
+            List<String> cmdList = Arrays.asList(tokens);
+            ProcessBuilder processBuilder = new ProcessBuilder(cmdList);
+            processBuilder.redirectErrorStream(true);
+            Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -186,7 +197,8 @@ public class Rce {
 
 
     public static void main(String[] args) throws Exception{
-        Runtime.getRuntime().exec("touch /tmp/x");
+        // Use ProcessBuilder with absolute path and argv array (no shell)
+        new ProcessBuilder("/usr/bin/touch", "/tmp/x").start();
     }
 }
 

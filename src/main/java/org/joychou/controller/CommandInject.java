@@ -24,8 +24,13 @@ public class CommandInject {
     @GetMapping("/codeinject")
     public String codeInject(String filepath) throws IOException {
 
-        String[] cmdList = new String[]{"sh", "-c", "ls -la " + filepath};
-        ProcessBuilder builder = new ProcessBuilder(cmdList);
+        String filterFilePath = SecurityUtil.cmdFilter(filepath);
+        if (null == filterFilePath) {
+            return "Invalid filepath: only alphanumeric, underscore, slash, dot, and hyphen are allowed.";
+        }
+
+        // Use argv array without shell to prevent command injection
+        ProcessBuilder builder = new ProcessBuilder("/bin/ls", "-la", filterFilePath);
         builder.redirectErrorStream(true);
         Process process = builder.start();
         return WebUtils.convertStreamToString(process.getInputStream());
@@ -47,8 +52,8 @@ public class CommandInject {
             return "Invalid host header.";
         }
 
-        // Use argv array without shell to prevent command injection
-        ProcessBuilder builder = new ProcessBuilder("curl", host);
+        // Use argv array with absolute path and without shell to prevent command injection
+        ProcessBuilder builder = new ProcessBuilder("/usr/bin/curl", host);
         builder.redirectErrorStream(true);
         Process process = builder.start();
         return WebUtils.convertStreamToString(process.getInputStream());
@@ -60,8 +65,8 @@ public class CommandInject {
         if (null == filterFilePath) {
             return "Bad boy. I got u.";
         }
-        String[] cmdList = new String[]{"sh", "-c", "ls -la " + filterFilePath};
-        ProcessBuilder builder = new ProcessBuilder(cmdList);
+        // Use argv array with absolute path and without shell to prevent command injection
+        ProcessBuilder builder = new ProcessBuilder("/bin/ls", "-la", filterFilePath);
         builder.redirectErrorStream(true);
         Process process = builder.start();
         return WebUtils.convertStreamToString(process.getInputStream());
