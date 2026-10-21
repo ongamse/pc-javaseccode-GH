@@ -36,6 +36,7 @@ public class CRLFInjection {
             String author = SecurityUtil.stripCRLF(test3);
             Cookie cookie = new Cookie("test3", author);
             cookie.setSecure(true);
+            cookie.setHttpOnly(true);
             response.addCookie(cookie);
         }
     }
