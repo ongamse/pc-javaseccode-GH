@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -12,7 +13,7 @@ public class ClassDataLoader {
 
     protected final Logger logger = LoggerFactory.getLogger(this.getClass());
 
-    @RequestMapping("/classloader")
+    @GetMapping("/classloader")
     public void classData() {
         try{
             ServletRequestAttributes sra = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
