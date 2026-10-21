@@ -3,6 +3,7 @@ package org.joychou.controller;
 import cn.hutool.http.HttpUtil;
 import org.joychou.security.SecurityUtil;
 import org.joychou.security.ssrf.SSRFException;
+import org.joychou.security.ssrf.SSRFChecker;
 import org.joychou.service.HttpService;
 import org.joychou.util.HttpUtils;
 import org.joychou.util.WebUtils;
@@ -117,6 +118,16 @@ public class SSRF {
      */
     @GetMapping("/openStream")
     public void openStream(@RequestParam String url, HttpServletResponse response) throws IOException {
+        // Validate URL to prevent SSRF
+        if (!SecurityUtil.isHttp(url)) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
+        if (SSRFChecker.isInternalIpByUrl(url)) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
+
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {

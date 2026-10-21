@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 
 import org.joychou.security.SecurityUtil;
+import org.joychou.security.ssrf.SSRFChecker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -101,6 +102,12 @@ public class URLWhiteList {
 
         String safeUrl = SecurityUtil.checkURL(url);
         if (safeUrl == null) {
+            res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
+
+        // Additional SSRF protection: reject internal IPs even if domain is whitelisted
+        if (SSRFChecker.isInternalIpByUrl(safeUrl)) {
             res.setStatus(HttpServletResponse.SC_FORBIDDEN);
             return;
         }

@@ -28,6 +28,9 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
+        if (url == null) {
+            return false;
+        }
         return url.startsWith("http://") || url.startsWith("https://");
     }
 
@@ -39,9 +42,16 @@ public class SecurityUtil {
      * @return host
      */
     public static String gethost(String url) {
+        if (url == null) {
+            return "";
+        }
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            if (host == null) {
+                return "";
+            }
+            return host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }

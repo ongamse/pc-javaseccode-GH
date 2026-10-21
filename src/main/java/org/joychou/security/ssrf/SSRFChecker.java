@@ -71,6 +71,10 @@ public class SSRFChecker {
                     return false;  // 内网ip直接return，非内网ip继续判断是否有重定向
                 }
 
+                if (!SecurityUtil.isHttp(finalUrl)) {
+                    logger.error("[-] SSRF check failed. Non-HTTP protocol: " + finalUrl);
+                    return false;
+                }
                 connection = (HttpURLConnection) new URL(finalUrl).openConnection();
                 connection.setInstanceFollowRedirects(false);
                 connection.setUseCaches(false); // 设置为false，手动处理跳转，可以拿到每个跳转的URL
@@ -289,12 +293,13 @@ public class SSRFChecker {
      */
     private static String url2host(String url) {
         try {
+            if (url == null || !SecurityUtil.isHttp(url)) {
+                return "";
+            }
             // use URI instead of URL
             URI u = new URI(url);
-            if (SecurityUtil.isHttp(url)) {
-                return u.getHost();
-            }
-            return "";
+            String host = u.getHost();
+            return host != null ? host : "";
         } catch (Exception e) {
             return "";
         }
