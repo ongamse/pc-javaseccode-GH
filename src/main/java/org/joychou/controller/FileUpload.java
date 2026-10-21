@@ -157,14 +157,25 @@ public class FileUpload {
     }
 
     private void deleteFile(String filePath) {
-        File delFile = new File(filePath);
-        if(delFile.isFile() && delFile.exists()) {
-            if (delFile.delete()) {
-                logger.info("[+] " + filePath + " delete successfully!");
+        try {
+            File delFile = new File(filePath).getCanonicalFile();
+            File allowedDir = new File(UPLOADED_FOLDER).getCanonicalFile();
+            String allowedPrefix = allowedDir.getCanonicalPath() + File.separator;
+            if (!delFile.getCanonicalPath().startsWith(allowedPrefix)
+                    && !delFile.getCanonicalPath().equals(allowedDir.getCanonicalPath())) {
+                logger.error("Blocked path traversal in deleteFile: " + filePath);
                 return;
             }
+            if (delFile.isFile() && delFile.exists()) {
+                if (delFile.delete()) {
+                    logger.info("[+] " + filePath + " delete successfully!");
+                    return;
+                }
+            }
+            logger.info(filePath + " delete failed!");
+        } catch (IOException e) {
+            logger.error("Error resolving canonical path for deleteFile: " + e.getMessage());
         }
-        logger.info(filePath + " delete failed!");
     }
 
     /**
