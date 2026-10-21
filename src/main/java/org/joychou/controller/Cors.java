@@ -26,7 +26,7 @@ public class Cors {
     public String vuls1(HttpServletRequest request, HttpServletResponse response) {
         String origin = request.getHeader("origin");
         if (origin != null && SecurityUtil.checkURL(origin) != null) {
-            response.setHeader("Access-Control-Allow-Origin", SecurityUtil.checkURL(origin));
+            response.setHeader("Access-Control-Allow-Origin", SecurityUtil.stripCRLF(SecurityUtil.checkURL(origin)));
             response.setHeader("Access-Control-Allow-Credentials", "true");
         }
         return info;
@@ -120,7 +120,7 @@ public class Cors {
             if (validatedOrigin == null) {
                 return "Origin is not safe.";
             }
-            response.setHeader("Access-Control-Allow-Origin", validatedOrigin);
+            response.setHeader("Access-Control-Allow-Origin", SecurityUtil.stripCRLF(validatedOrigin));
             response.setHeader("Access-Control-Allow-Credentials", "true");
         }
         return LoginUtils.getUserInfo2JsonStr(request);
