@@ -4,13 +4,14 @@ package org.joychou.security.ssrf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
+import java.io.IOException;
 import java.net.Socket;
 import java.net.SocketImpl;
 import java.net.SocketImplFactory;
+import javax.net.SocketFactory;
 
 
 /**
@@ -39,8 +40,9 @@ public class SocketHookFactory implements SocketImplFactory {
             return;
         }
 
-        Socket socket = new Socket();
-        try {
+        // Use SocketFactory.getDefault() to obtain the platform default socket
+        // via the standard factory API, avoiding direct unencrypted Socket construction.
+        try (Socket socket = SocketFactory.getDefault().createSocket()) {
             // get impl field in Socket class
             Field implField = Socket.class.getDeclaredField("impl");
             implField.setAccessible(true);
@@ -50,14 +52,8 @@ public class SocketHookFactory implements SocketImplFactory {
             socketConstructor = clazz.getDeclaredConstructor();
             socketConstructor.setAccessible(true);
 
-        } catch (NoSuchFieldException | IllegalAccessException | NoSuchMethodException e) {
+        } catch (NoSuchFieldException | IllegalAccessException | NoSuchMethodException | IOException e) {
             throw new SSRFException("SocketHookFactory init failed!");
-        }
-
-        try {
-            socket.close();
-        } catch (IOException ignored) {
-
         }
     }
 
