@@ -64,7 +64,7 @@ public class SQLI {
             String sql = "select * from users where username = ?";
             PreparedStatement statement = con.prepareStatement(sql);
             statement.setString(1, username);
-            logger.info(statement.toString());
+            logger.info(sql);
             ResultSet rs = statement.executeQuery();
 
             while (rs.next()) {
@@ -151,7 +151,7 @@ public class SQLI {
             PreparedStatement st = con.prepareStatement(sql);
             st.setString(1, username);
 
-            logger.info(st.toString());
+            logger.info(sql);
             ResultSet rs = st.executeQuery();
 
             while (rs.next()) {
