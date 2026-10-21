@@ -335,7 +335,7 @@ public class SecurityUtil {
         if (input == null) {
             return "";
         }
-        String sanitized = input.replaceAll("[\\r\\n]", "");
+        String sanitized = input.replaceAll("[\\p{Cntrl}]", "");
         if (sanitized.length() > maxLength) {
             sanitized = sanitized.substring(0, maxLength);
         }

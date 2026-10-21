@@ -31,8 +31,8 @@ public class WebSockets {
      */
     @GetMapping("/websocket/cmd")
     public String cmdInject(HttpServletRequest req) {
-        String path = req.getParameter("path");
-        if (SecurityUtil.validateWebSocketPath(path) == null) {
+        String path = SecurityUtil.validateWebSocketPath(req.getParameter("path"));
+        if (path == null) {
             return "invalid path";
         }
         ServletContext sc = req.getServletContext();
@@ -54,8 +54,8 @@ public class WebSockets {
 
     @GetMapping("/websocket/proxy")
     public String proxyInject(HttpServletRequest req) {
-        String path = req.getParameter("path");
-        if (SecurityUtil.validateWebSocketPath(path) == null) {
+        String path = SecurityUtil.validateWebSocketPath(req.getParameter("path"));
+        if (path == null) {
             return "invalid path";
         }
         ServletContext sc = req.getServletContext();
