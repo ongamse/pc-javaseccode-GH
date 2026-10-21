@@ -5,6 +5,7 @@ import javax.servlet.http.HttpServletRequest;
 import java.io.*;
 
 import com.google.common.base.Preconditions;
+import org.apache.commons.io.FilenameUtils;
 import org.springframework.web.util.HtmlUtils;
 
 public class WebUtils {
@@ -23,6 +24,9 @@ public class WebUtils {
 
     public static String getCookieValueByName(HttpServletRequest request, String cookieName) {
         Cookie cookie = org.springframework.web.util.WebUtils.getCookie(request, cookieName);
+        if (cookie != null) {
+            cookie.setSecure(true);
+        }
         return cookie == null ? null : cookie.getValue();
     }
 
@@ -34,7 +38,10 @@ public class WebUtils {
 
     public static String getFileExtension(String fullName) {
         Preconditions.checkNotNull(fullName);
-        String fileName = (new File(fullName)).getName();
+        String fileName = FilenameUtils.getName(fullName);
+        if (fileName == null || fileName.isEmpty()) {
+            return "";
+        }
         int dotIndex = fileName.lastIndexOf('.');
         return dotIndex == -1 ? "" : fileName.substring(dotIndex + 1);
     }
@@ -42,7 +49,10 @@ public class WebUtils {
 
     public static String getNameWithoutExtension(String file) {
         Preconditions.checkNotNull(file);
-        String fileName = (new File(file)).getName();
+        String fileName = FilenameUtils.getName(file);
+        if (fileName == null || fileName.isEmpty()) {
+            return "";
+        }
         int dotIndex = fileName.lastIndexOf('.');
         return dotIndex == -1 ? fileName : fileName.substring(0, dotIndex);
     }

@@ -1,6 +1,7 @@
 package org.joychou.security;
 
 
+import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -24,8 +25,9 @@ public class CsrfAccessDeniedHandler implements AccessDeniedHandler {
     public void handle(HttpServletRequest request, HttpServletResponse response,
                        AccessDeniedException accessDeniedException) throws IOException {
 
-        logger.info("[-] URL: " + request.getRequestURL() + "?" + request.getQueryString() + "\t" +
-                "Referer: " + request.getHeader("referer"));
+        String queryString = SecurityUtil.sanitizeForLog(request.getQueryString(), 1024);
+        String referer = SecurityUtil.sanitizeForLog(request.getHeader("referer"), 1024);
+        logger.info("[-] URL: {}?{}\tReferer: {}", request.getRequestURL(), queryString, referer);
 
         response.setContentType(MediaType.TEXT_HTML_VALUE); // content-type: text/html
         response.setStatus(HttpServletResponse.SC_FORBIDDEN); // 403 forbidden

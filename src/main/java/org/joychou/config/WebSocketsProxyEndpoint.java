@@ -5,6 +5,7 @@ import javax.websocket.EndpointConfig;
 import javax.websocket.MessageHandler;
 import javax.websocket.Session;
 import java.io.ByteArrayOutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousSocketChannel;
@@ -12,6 +13,8 @@ import java.nio.channels.CompletionHandler;
 import java.util.HashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+
+import org.joychou.security.ssrf.SSRFChecker;
 
 public class WebSocketsProxyEndpoint extends Endpoint {
     long i = 0;
@@ -72,10 +75,31 @@ public class WebSocketsProxyEndpoint extends Endpoint {
             } else if (i == 1) {
                 String values = new String(z.array());
                 String[] array = values.split(" ");
+                if (array.length < 2 || !array[1].contains(":")) {
+                    channel.getBasicRemote().sendText("HTTP/1.1 400 Bad Request\r\n\r\n");
+                    return;
+                }
                 String[] addrarray = array[1].split(":");
-                AsynchronousSocketChannel client = AsynchronousSocketChannel.open();
+                String targetHost = addrarray[0];
                 int po = Integer.parseInt(addrarray[1]);
-                InetSocketAddress hostAddress = new InetSocketAddress(addrarray[0], po);
+
+                // Validate destination against SSRF: construct URL for allowlist + internal IP check
+                String proxyUrl = "http://" + targetHost + ":" + po;
+                if (!SSRFChecker.checkURLFckSSRF(proxyUrl)) {
+                    channel.getBasicRemote().sendText("HTTP/1.1 403 Forbidden\r\n\r\n");
+                    return;
+                }
+
+                // Resolve hostname and reject internal/private IP ranges
+                InetAddress resolved = InetAddress.getByName(targetHost);
+                String resolvedIp = resolved.getHostAddress();
+                if (SSRFChecker.isInternalIp(resolvedIp)) {
+                    channel.getBasicRemote().sendText("HTTP/1.1 403 Forbidden\r\n\r\n");
+                    return;
+                }
+
+                AsynchronousSocketChannel client = AsynchronousSocketChannel.open();
+                InetSocketAddress hostAddress = new InetSocketAddress(resolved, po);
                 Future<Void> future = client.connect(hostAddress);
                 try {
                     future.get(10, TimeUnit.SECONDS);

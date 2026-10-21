@@ -65,13 +65,26 @@ public class SSRFChecker {
         String finalUrl = url;
         try {
             do {
+                // Enforce HTTP/HTTPS protocol on every URL (including redirects)
+                if (!SecurityUtil.isHttp(finalUrl)) {
+                    logger.error("[-] SSRF check failed. Non-HTTP protocol: " + finalUrl);
+                    return false;
+                }
+
+                // Validate against domain allowlist before any connection
+                if (!checkURLFckSSRF(finalUrl)) {
+                    logger.error("[-] SSRF check failed. URL not in domain allowlist: " + finalUrl);
+                    return false;
+                }
+
                 // 判断当前请求的URL是否是内网ip
                 if (isInternalIpByUrl(finalUrl)) {
                     logger.error("[-] SSRF check failed. Dangerous url: " + finalUrl);
                     return false;  // 内网ip直接return，非内网ip继续判断是否有重定向
                 }
 
-                connection = (HttpURLConnection) new URL(finalUrl).openConnection();
+                URL validatedUrl = new URL(finalUrl);
+                connection = (HttpURLConnection) validatedUrl.openConnection();
                 connection.setInstanceFollowRedirects(false);
                 connection.setUseCaches(false); // 设置为false，手动处理跳转，可以拿到每个跳转的URL
                 connection.setConnectTimeout(connectTime);
@@ -93,7 +106,8 @@ public class SSRFChecker {
             } while (connection.getResponseCode() != HttpURLConnection.HTTP_OK);
             connection.disconnect();
         } catch (Exception e) {
-            return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
+            logger.error("[-] SSRF check exception, failing closed: " + e.getMessage());
+            return false;  // Fail closed: treat exceptions as unsafe to prevent bypass
         }
         return true; // 默认返回true
     }

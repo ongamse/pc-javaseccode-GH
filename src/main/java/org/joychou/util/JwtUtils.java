@@ -17,8 +17,17 @@ import java.util.Date;
 public class JwtUtils {
 
     private static final long EXPIRE = 1440 * 60 * 1000;  // 1440 Minutes, 1 DAY
-    private static final String SECRET = "123456";
+    // ROTATE: previous key was committed to version control and must be revoked/reissued
+    private static final String SECRET = loadSecret();
     private static final String B64_SECRET = Base64.getEncoder().encodeToString(SECRET.getBytes(StandardCharsets.UTF_8));
+
+    private static String loadSecret() {
+        String secret = System.getenv("JWT_SECRET_KEY");
+        if (secret == null || secret.isEmpty()) {
+            throw new IllegalStateException("JWT_SECRET_KEY environment variable must be set");
+        }
+        return secret;
+    }
 
     /**
      * Generate JWT Token by jjwt (last update time: Jul 05, 2018)

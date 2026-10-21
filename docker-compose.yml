@@ -8,8 +8,20 @@ services:
             - "8000:8000"
         links:
             - j_mysql
+        read_only: true
+        tmpfs:
+            - /tmp
+        security_opt:
+            - no-new-privileges:true
 
     j_mysql:
         image: joychou/jsc_mysql:latest
         ports:
             - "3306:3306"
+        read_only: true
+        tmpfs:
+            - /tmp
+            - /run/mysqld
+            - /var/lib/mysql
+        security_opt:
+            - no-new-privileges:true

@@ -42,10 +42,14 @@ public class Jsonp {
      * <p>
      * http://localhost:8080/jsonp/vuln/referer?callback_=test
      */
-    @RequestMapping(value = "/vuln/referer", produces = "application/javascript")
+    @GetMapping(value = "/vuln/referer", produces = "application/javascript")
     public String referer(HttpServletRequest request) {
         String callback = request.getParameter(this.callback);
-        return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
+        String safeCallback = SecurityUtil.validateJsonpCallback(callback);
+        if (safeCallback == null) {
+            return "{\"error\": \"invalid callback\"}";
+        }
+        return WebUtils.json2Jsonp(safeCallback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
     /**
@@ -62,7 +66,11 @@ public class Jsonp {
             return "error";
         }
         String callback = request.getParameter(this.callback);
-        return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
+        String safeCallback = SecurityUtil.validateJsonpCallback(callback);
+        if (safeCallback == null) {
+            return "{\"error\": \"invalid callback\"}";
+        }
+        return WebUtils.json2Jsonp(safeCallback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
     /**
@@ -73,7 +81,7 @@ public class Jsonp {
      * @return Only return object, AbstractJsonpResponseBodyAdvice can be used successfully.
      * Such as JSONOjbect or JavaBean. String type cannot be used.
      */
-    @RequestMapping(value = "/object2jsonp", produces = MediaType.APPLICATION_JSON_VALUE)
+    @GetMapping(value = "/object2jsonp", produces = MediaType.APPLICATION_JSON_VALUE)
     public JSONObject advice(HttpServletRequest request) {
         return JSON.parseObject(LoginUtils.getUserInfo2JsonStr(request));
     }
@@ -86,7 +94,7 @@ public class Jsonp {
      * - Spring Framework 5.0 to 5.0.6
      * - Spring Framework 4.1 to 4.3.17
      */
-    @RequestMapping(value = "/vuln/mappingJackson2JsonView", produces = MediaType.APPLICATION_JSON_VALUE)
+    @GetMapping(value = "/vuln/mappingJackson2JsonView", produces = MediaType.APPLICATION_JSON_VALUE)
     public ModelAndView mappingJackson2JsonView(HttpServletRequest req) {
         ModelAndView view = new ModelAndView(new MappingJackson2JsonView());
         Principal principal = req.getUserPrincipal();
@@ -107,7 +115,11 @@ public class Jsonp {
             return "error";
         }
         String callback = request.getParameter(this.callback);
-        return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
+        String safeCallback = SecurityUtil.validateJsonpCallback(callback);
+        if (safeCallback == null) {
+            return "{\"error\": \"invalid callback\"}";
+        }
+        return WebUtils.json2Jsonp(safeCallback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
     /**
@@ -130,8 +142,9 @@ public class Jsonp {
         CsrfToken csrfToken = cookieCsrfTokenRepository.loadToken(request); // get csrf token
 
         String callback = request.getParameter("fastjsonpCallback");
-        if (StringUtils.isNotBlank(callback)) {
-            JSONPObject jsonpObj = new JSONPObject(callback);
+        String safeCallback = SecurityUtil.validateJsonpCallback(callback);
+        if (StringUtils.isNotBlank(safeCallback)) {
+            JSONPObject jsonpObj = new JSONPObject(safeCallback);
             jsonpObj.addParameter(csrfToken);
             return jsonpObj.toString();
         } else {
