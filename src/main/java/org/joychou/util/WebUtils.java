@@ -24,6 +24,9 @@ public class WebUtils {
 
     public static String getCookieValueByName(HttpServletRequest request, String cookieName) {
         Cookie cookie = org.springframework.web.util.WebUtils.getCookie(request, cookieName);
+        if (cookie != null) {
+            cookie.setSecure(true);
+        }
         return cookie == null ? null : cookie.getValue();
     }
 
