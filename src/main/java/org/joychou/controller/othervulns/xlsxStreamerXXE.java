@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.xml.XMLConstants;
 import java.io.FileInputStream;
 import java.io.IOException;
 
@@ -33,8 +34,26 @@ public class xlsxStreamerXXE {
 
 
     @PostMapping("/readxlsx")
-    public void xllx_streamer_xxe(MultipartFile file) throws IOException {
-        StreamingReader.builder().open(file.getInputStream());
+    public void xllx_streamer_xxe(MultipartFile file) throws Exception {
+        // Disable external entities at the JVM SAX parser level before opening XLSX
+        String prevDtd = System.getProperty(XMLConstants.ACCESS_EXTERNAL_DTD);
+        String prevSchema = System.getProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA);
+        try {
+            System.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            System.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            StreamingReader.builder().open(file.getInputStream());
+        } finally {
+            if (prevDtd != null) {
+                System.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, prevDtd);
+            } else {
+                System.clearProperty(XMLConstants.ACCESS_EXTERNAL_DTD);
+            }
+            if (prevSchema != null) {
+                System.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, prevSchema);
+            } else {
+                System.clearProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA);
+            }
+        }
     }
 
 

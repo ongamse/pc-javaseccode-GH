@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
+import org.joychou.security.SecurityUtil;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,6 +17,10 @@ import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.sql.DriverManager;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 
 /**
@@ -28,13 +33,20 @@ import java.sql.DriverManager;
 @RequestMapping("/rce")
 public class Rce {
 
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(Arrays.asList(
+            "whoami", "id", "hostname", "date", "uptime", "uname"
+    ));
+
     @GetMapping("/runtime/exec")
     public String CommandExec(String cmd) {
-        Runtime run = Runtime.getRuntime();
+        if (cmd == null || !ALLOWED_COMMANDS.contains(cmd.trim())) {
+            return "Command not allowed. Allowed: " + ALLOWED_COMMANDS;
+        }
         StringBuilder sb = new StringBuilder();
 
         try {
-            Process p = run.exec(cmd);
+            ProcessBuilder pb = new ProcessBuilder(cmd.trim());
+            Process p = pb.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -63,11 +75,14 @@ public class Rce {
     @GetMapping("/ProcessBuilder")
     public String processBuilder(String cmd) {
 
+        if (cmd == null || !ALLOWED_COMMANDS.contains(cmd.trim())) {
+            return "Command not allowed. Allowed: " + ALLOWED_COMMANDS;
+        }
+
         StringBuilder sb = new StringBuilder();
 
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
-            ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
+            ProcessBuilder processBuilder = new ProcessBuilder(cmd.trim());
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
@@ -92,13 +107,25 @@ public class Rce {
      *
      * @param jsurl js url
      */
+    private static final Pattern SAFE_URL_PATTERN = Pattern.compile("^https://[a-zA-Z0-9][a-zA-Z0-9.\\-]+(:[0-9]+)?(/[a-zA-Z0-9._\\-/]*)?$");
+
     @GetMapping("/jscmd")
-    public void jsEngine(String jsurl) throws Exception{
+    public String jsEngine(String jsurl) throws Exception{
+        if (jsurl == null || !SAFE_URL_PATTERN.matcher(jsurl).matches()) {
+            return "Invalid URL. Only HTTPS URLs with alphanumeric hostnames are allowed.";
+        }
         // js nashorn javascript ecmascript
         ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
         Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
+        bindings.remove("java");
+        bindings.remove("javax");
+        bindings.remove("org");
+        bindings.remove("com");
+        bindings.remove("Packages");
+        bindings.put("Java", null);
         String cmd = String.format("load(\"%s\")", jsurl);
         engine.eval(cmd, bindings);
+        return "Executed successfully.";
     }
 
 
@@ -110,7 +137,7 @@ public class Rce {
      */
     @GetMapping("/vuln/yarm")
     public void yarm(String content) {
-        Yaml y = new Yaml();
+        Yaml y = new Yaml(new SafeConstructor());
         y.load(content);
     }
 
@@ -124,10 +151,27 @@ public class Rce {
      * http://localhost:8080/rce/groovy?content="open -a Calculator".execute()
      * @param content groovy shell
      */
+    private static final Pattern SAFE_GROOVY_PATTERN = Pattern.compile("^[a-zA-Z0-9\\s+\\-*/().,'\"=<>!&|;{}\\[\\]@:]+$");
+    private static final Set<String> GROOVY_BLACKLIST_KEYWORDS = new HashSet<>(Arrays.asList(
+            "Runtime", "ProcessBuilder", "exec", "execute", "System.exit",
+            "getRuntime", "Process", "Thread", "ClassLoader", "URLClassLoader",
+            "getClass", "forName", "newInstance", "getMethod", "invoke",
+            "java.lang.Runtime", "java.io", "java.net", "import"
+    ));
+
     @GetMapping("groovy")
-    public void groovyshell(String content) {
+    public String groovyshell(String content) {
+        if (content == null || content.isEmpty()) {
+            return "Content must not be empty.";
+        }
+        for (String keyword : GROOVY_BLACKLIST_KEYWORDS) {
+            if (content.contains(keyword)) {
+                return "Groovy script contains disallowed keyword: " + keyword;
+            }
+        }
         GroovyShell groovyShell = new GroovyShell();
-        groovyShell.evaluate(content);
+        Object result = groovyShell.evaluate(content);
+        return result != null ? result.toString() : "";
     }
 
 

@@ -11,6 +11,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 
 @RestController
@@ -35,14 +36,23 @@ public class PathTraversal {
         return getImgBase64(filepath);
     }
 
+    private static final String IMG_BASE_DIR = System.getProperty("user.dir");
+
     private String getImgBase64(String imgFile) throws IOException {
 
         logger.info("Working directory: " + System.getProperty("user.dir"));
         logger.info("File path: " + imgFile);
 
-        File f = new File(imgFile);
+        // Canonicalize and validate path stays within base directory
+        Path basePath = Paths.get(IMG_BASE_DIR).toAbsolutePath().normalize();
+        Path resolvedPath = basePath.resolve(imgFile).normalize();
+        if (!resolvedPath.startsWith(basePath)) {
+            return "Illegal file path: path traversal detected.";
+        }
+
+        File f = resolvedPath.toFile();
         if (f.exists() && !f.isDirectory()) {
-            byte[] data = Files.readAllBytes(Paths.get(imgFile));
+            byte[] data = Files.readAllBytes(resolvedPath);
             return new String(Base64.encodeBase64(data));
         } else {
             return "File doesn't exist or is not a file.";

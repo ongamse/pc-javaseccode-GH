@@ -28,6 +28,9 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.util.concurrent.*;
 
+import org.joychou.security.SecurityUtil;
+import org.joychou.security.ssrf.SSRFChecker;
+
 /**
  * @author JoyChou 2020-04-06
  */
@@ -35,7 +38,29 @@ public class HttpUtils {
 
     private final static Logger logger = LoggerFactory.getLogger(HttpUtils.class);
 
+    /**
+     * Validate that the URL is safe from SSRF attacks.
+     * Checks that the URL uses HTTP/HTTPS protocol and does not point to an internal IP.
+     */
+    private static void validateUrl(String url) throws IOException {
+        if (url == null) {
+            throw new IOException("URL must not be null");
+        }
+        if (!SecurityUtil.isHttp(url)) {
+            throw new IOException("Only HTTP and HTTPS protocols are allowed");
+        }
+        if (SSRFChecker.isInternalIpByUrl(url)) {
+            throw new IOException("Requests to internal network addresses are not allowed");
+        }
+    }
+
     public static String commonHttpClient(String url) {
+
+        try {
+            validateUrl(url);
+        } catch (IOException e) {
+            return "Error: " + e.getMessage();
+        }
 
         HttpClient client = new HttpClient();
         GetMethod method = new GetMethod(url);
@@ -56,6 +81,7 @@ public class HttpUtils {
 
     public static String request(String url) {
         try {
+            validateUrl(url);
             return Request.Get(url).execute().returnContent().toString();
         } catch (Exception e) {
             return e.getMessage();
@@ -68,6 +94,7 @@ public class HttpUtils {
         StringBuilder result = new StringBuilder();
 
         try {
+            validateUrl(url);
 
             CloseableHttpClient client = HttpClients.createDefault();
             HttpGet httpGet = new HttpGet(url);
@@ -91,6 +118,7 @@ public class HttpUtils {
 
     public static String URLConnection(String url) {
         try {
+            validateUrl(url);
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
             BufferedReader in = new BufferedReader(new InputStreamReader(urlConnection.getInputStream())); //send request
@@ -115,6 +143,7 @@ public class HttpUtils {
      */
     public static String HttpURLConnection(String url) {
         try {
+            validateUrl(url);
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
             HttpURLConnection conn = (HttpURLConnection) urlConnection;
@@ -144,6 +173,7 @@ public class HttpUtils {
      */
     public static String Jsoup(String url) {
         try {
+            validateUrl(url);
             Document doc = Jsoup.connect(url)
 //                    .followRedirects(false)
                     .timeout(3000)
@@ -162,6 +192,7 @@ public class HttpUtils {
      * UserAgent is <code>okhttp/2.5.0</code>.
      */
     public static String okhttp(String url) throws IOException {
+        validateUrl(url);
         OkHttpClient client = new OkHttpClient();
 //         client.setFollowRedirects(false);
         com.squareup.okhttp.Request ok_http = new com.squareup.okhttp.Request.Builder().url(url).build();
@@ -178,6 +209,7 @@ public class HttpUtils {
      */
     public static void imageIO(String url) {
         try {
+            validateUrl(url);
             URL u = new URL(url);
             ImageIO.read(u); // send request
         } catch (IOException e) {
@@ -195,6 +227,7 @@ public class HttpUtils {
      */
     public static void IOUtils(String url) {
         try {
+            validateUrl(url);
             IOUtils.toByteArray(URI.create(url));
         } catch (IOException e) {
             logger.error(e.getMessage());
@@ -205,6 +238,7 @@ public class HttpUtils {
     public static String HttpAsyncClients(String url) {
         CloseableHttpAsyncClient httpclient = HttpAsyncClients.createDefault();
         try {
+            validateUrl(url);
             httpclient.start();
             final HttpGet request = new HttpGet(url);
             Future<HttpResponse> future = httpclient.execute(request, null);
