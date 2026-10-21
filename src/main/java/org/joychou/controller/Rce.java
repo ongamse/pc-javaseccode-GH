@@ -16,6 +16,9 @@ import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.sql.DriverManager;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
 
 
 /**
@@ -27,6 +30,11 @@ import java.sql.DriverManager;
 @RestController
 @RequestMapping("/rce")
 public class Rce {
+
+    // Allowlist of commands permitted for the ProcessBuilder endpoint
+    private static final Set<String> ALLOWED_COMMANDS = Set.of(
+            "whoami", "id", "hostname", "date", "uptime", "uname", "df", "free", "ps"
+    );
 
     @GetMapping("/runtime/exec")
     public String CommandExec(String cmd) {
@@ -66,8 +74,17 @@ public class Rce {
         StringBuilder sb = new StringBuilder();
 
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
-            ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
+            // Parse user input into tokens; validate command against allowlist
+            String[] tokens = cmd.trim().split("\\s+");
+            String command = tokens[0];
+
+            if (!ALLOWED_COMMANDS.contains(command)) {
+                return "Command not allowed. Permitted commands: " + ALLOWED_COMMANDS;
+            }
+
+            // Build argument list without a shell; no shell interpolation
+            List<String> cmdList = Arrays.asList(tokens);
+            ProcessBuilder processBuilder = new ProcessBuilder(cmdList);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
