@@ -4,28 +4,40 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
- * RASP：Hook java/io/ObjectInputStream类的resolveClass方法
- * RASP: https://github.com/baidu/openrasp/blob/master/agent/java/engine/src/main/java/com/baidu/openrasp/hook/DeserializationHook.java
+ * Allowlist-based ObjectInputStream that only permits deserialization of
+ * explicitly approved classes. All other classes are rejected with an
+ * InvalidClassException.
  *
  * Run main method to test.
  */
 public class AntObjectInputStream extends ObjectInputStream {
 
-    protected final Logger logger= LoggerFactory.getLogger(AntObjectInputStream.class);
+    protected final Logger logger = LoggerFactory.getLogger(AntObjectInputStream.class);
+
+    /** Allowlist of classes permitted for deserialization. */
+    private static final Set<String> ALLOWED_CLASSES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+            "org.joychou.dao.User",
+            "org.joychou.security.AntObjectInputStream$MyObject",
+            "java.lang.String",
+            "java.lang.Integer",
+            "java.lang.Long",
+            "java.lang.Boolean",
+            "java.lang.Number"
+    )));
 
     public AntObjectInputStream(InputStream inputStream) throws IOException {
         super(inputStream);
     }
 
     /**
-     * 只允许反序列化SerialObject class
-     *
-     * 在应用上使用黑白名单校验方案比较局限，因为只有使用自己定义的AntObjectInputStream类，进行反序列化才能进行校验。
-     * 类似fastjson通用类的反序列化就不能校验。
-     * 但是RASP是通过HOOK java/io/ObjectInputStream类的resolveClass方法，全局的检测白名单。
-     *
+     * Only allow deserialization of classes in the allowlist.
+     * Rejects any class not explicitly permitted.
      */
     @Override
     protected Class<?> resolveClass(final ObjectStreamClass desc)
@@ -33,17 +45,10 @@ public class AntObjectInputStream extends ObjectInputStream {
     {
         String className = desc.getName();
 
-        // Deserialize class name: org.joychou.security.AntObjectInputStream$MyObject
-        logger.info("Deserialize class name: " + className);
+        logger.info("Deserialize class name: {}", className);
 
-        String[] denyClasses = {"java.net.InetAddress",
-                                "org.apache.commons.collections.Transformer",
-                                "org.apache.commons.collections.functors"};
-
-        for (String denyClass : denyClasses) {
-            if (className.startsWith(denyClass)) {
-                throw new InvalidClassException("Unauthorized deserialization attempt", className);
-            }
+        if (!ALLOWED_CLASSES.contains(className)) {
+            throw new InvalidClassException("Unauthorized deserialization attempt — class not in allowlist", className);
         }
 
         return super.resolveClass(desc);

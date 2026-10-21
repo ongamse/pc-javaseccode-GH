@@ -2,6 +2,8 @@ package org.joychou.controller;
 
 import com.thoughtworks.xstream.XStream;
 import com.thoughtworks.xstream.io.xml.DomDriver;
+import com.thoughtworks.xstream.security.NoTypePermission;
+import com.thoughtworks.xstream.security.PrimitiveTypePermission;
 import org.joychou.dao.User;
 import org.joychou.util.WebUtils;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,8 +26,10 @@ public class XStreamRce {
     public String parseXml(HttpServletRequest request) throws Exception {
         String xml = WebUtils.getRequestBody(request);
         XStream xstream = new XStream(new DomDriver());
-        XStream.setupDefaultSecurity(xstream);
-        xstream.allowTypes(new Class[]{org.joychou.dao.User.class});
+        // Deny all types by default, then explicitly allow only safe types
+        xstream.addPermission(NoTypePermission.NONE);
+        xstream.addPermission(PrimitiveTypePermission.PRIMITIVES);
+        xstream.allowTypes(new Class[]{User.class, String.class});
         xstream.fromXML(xml);
         return "xstream";
     }
