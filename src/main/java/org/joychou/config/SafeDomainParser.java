@@ -30,6 +30,11 @@ public class SafeDomainParser {
             // 读取resources目录下的文件
             ClassPathResource resource = new ClassPathResource(safeDomainClassPath);
             DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+            dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            dbf.setXIncludeAware(false);
+            dbf.setExpandEntityReferences(false);
             DocumentBuilder db = dbf.newDocumentBuilder();
             Document doc = db.parse(resource.getInputStream());  // parse xml
 
@@ -86,6 +91,11 @@ public class SafeDomainParser {
             // 读取resources目录下的文件
             ClassPathResource resource = new ClassPathResource(ssrfSafeDomainClassPath);
             DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+            dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            dbf.setXIncludeAware(false);
+            dbf.setExpandEntityReferences(false);
             DocumentBuilder db = dbf.newDocumentBuilder();
             // 修复打包成jar包运行，不能读取文件的bug
             Document doc = db.parse(resource.getInputStream());  // parse xml
