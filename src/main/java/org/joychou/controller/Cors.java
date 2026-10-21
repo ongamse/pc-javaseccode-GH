@@ -25,8 +25,10 @@ public class Cors {
     @GetMapping("/vuln/origin")
     public String vuls1(HttpServletRequest request, HttpServletResponse response) {
         String origin = request.getHeader("origin");
-        response.setHeader("Access-Control-Allow-Origin", origin); // set origin from header
-        response.setHeader("Access-Control-Allow-Credentials", "true");  // allow cookie
+        if (origin != null && SecurityUtil.checkURL(origin) != null) {
+            response.setHeader("Access-Control-Allow-Origin", SecurityUtil.checkURL(origin));
+            response.setHeader("Access-Control-Allow-Credentials", "true");
+        }
         return info;
     }
 
@@ -107,11 +109,14 @@ public class Cors {
 
         // 如果origin不为空并且origin不在白名单内，认定为不安全。
         // 如果origin为空，表示是同域过来的请求或者浏览器直接发起的请求。
-        if (origin != null && SecurityUtil.checkURL(origin) == null) {
-            return "Origin is not safe.";
+        if (origin != null) {
+            String validatedOrigin = SecurityUtil.checkURL(origin);
+            if (validatedOrigin == null) {
+                return "Origin is not safe.";
+            }
+            response.setHeader("Access-Control-Allow-Origin", validatedOrigin);
+            response.setHeader("Access-Control-Allow-Credentials", "true");
         }
-        response.setHeader("Access-Control-Allow-Origin", origin);
-        response.setHeader("Access-Control-Allow-Credentials", "true");
         return LoginUtils.getUserInfo2JsonStr(request);
     }
 
