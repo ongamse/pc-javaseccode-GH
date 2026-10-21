@@ -71,12 +71,64 @@ public class URLRedirect {
     @ResponseBody
     public static void forward(HttpServletRequest request, HttpServletResponse response) {
         String url = request.getParameter("url");
+
+        if (!isValidForwardPath(url)) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            try {
+                response.getWriter().write("url forbidden");
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
         RequestDispatcher rd = request.getRequestDispatcher(url);
         try {
             rd.forward(request, response);
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Validate that a forward path does not access sensitive internal resources
+     * or use path traversal sequences.
+     */
+    private static boolean isValidForwardPath(String path) {
+        if (path == null || path.isEmpty()) {
+            return false;
+        }
+
+        if (!path.startsWith("/")) {
+            return false;
+        }
+
+        // Normalize to detect encoded traversal sequences
+        String decoded = path;
+        try {
+            while (decoded.contains("%")) {
+                String prev = decoded;
+                decoded = java.net.URLDecoder.decode(decoded, "UTF-8");
+                if (decoded.equals(prev)) {
+                    break;
+                }
+            }
+        } catch (java.io.UnsupportedEncodingException e) {
+            return false;
+        }
+
+        // Block path traversal
+        if (decoded.contains("..")) {
+            return false;
+        }
+
+        // Block access to sensitive internal directories
+        String upper = decoded.toUpperCase();
+        if (upper.contains("/WEB-INF") || upper.contains("/META-INF")) {
+            return false;
+        }
+
+        return true;
     }
 
 
