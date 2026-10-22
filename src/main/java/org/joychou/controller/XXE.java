@@ -30,6 +30,7 @@ import org.xml.sax.helpers.DefaultHandler;
 import org.apache.commons.digester3.Digester;
 import org.jdom2.input.SAXBuilder;
 import org.joychou.util.WebUtils;
+import org.springframework.web.util.HtmlUtils;
 import org.xmlbeam.annotation.XBRead;
 
 /**
