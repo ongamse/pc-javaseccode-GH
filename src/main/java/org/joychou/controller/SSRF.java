@@ -6,6 +6,7 @@ import org.joychou.security.ssrf.SSRFException;
 import org.joychou.service.HttpService;
 import org.joychou.util.HttpUtils;
 import org.joychou.util.WebUtils;
+import org.springframework.web.util.HtmlUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -98,9 +99,9 @@ public class SSRF {
     public String request(@RequestParam String url) {
         try {
             SecurityUtil.startSSRFHook();
-            return HttpUtils.request(url);
+            return HtmlUtils.htmlEscape(HttpUtils.request(url));
         } catch (SSRFException | IOException e) {
-            return e.getMessage();
+            return HtmlUtils.htmlEscape(String.valueOf(e.getMessage()));
         } finally {
             SecurityUtil.stopSSRFHook();
         }
@@ -117,10 +118,17 @@ public class SSRF {
      */
     @GetMapping("/openStream")
     public void openStream(@RequestParam String url, HttpServletResponse response) throws IOException {
+        // SSRF protection: enforce HTTP(S) and block internal IPs
+        if (!SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Blocked: URL failed SSRF validation");
+            return;
+        }
+
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {
-            String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
+            String downLoadImgFileName = SecurityUtil.sanitizeHeaderValue(
+                    WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url));
             // download
             response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
 
@@ -308,10 +316,20 @@ public class SSRF {
     @GetMapping("/dnsrebind/vuln")
     public String DnsRebind(String url) {
         java.security.Security.setProperty("networkaddress.cache.negative.ttl" , "0");
+        if (!SecurityUtil.isHttp(url)) {
+            return "[-] Only HTTP/HTTPS protocols are allowed";
+        }
         if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
             return "Dangerous url";
         }
-        return HttpUtil.get(url);
+        try {
+            SecurityUtil.startSSRFHook();
+            return HttpUtil.get(url);
+        } catch (Exception e) {
+            return e.getMessage();
+        } finally {
+            SecurityUtil.stopSSRFHook();
+        }
     }
 
 

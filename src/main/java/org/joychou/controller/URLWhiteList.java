@@ -5,6 +5,7 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.util.HtmlUtils;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -104,16 +105,24 @@ public class URLWhiteList {
             return;
         }
 
-        URL u = new URL(url);
-        String host = u.getHost();
+        // Use URI-based host extraction (not java.net.URL) to prevent parser-differential bypass
+        String host = SecurityUtil.gethost(url);
+        if (host == null || host.isEmpty()) {
+            return;
+        }
         logger.info("host:  " + host);
 
-        // endsWith .
-        for (String domain : domainwhitelist) {
-            if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
-            }
+        // Block requests to internal/private IP ranges
+        if (org.joychou.security.ssrf.SSRFChecker.isInternalIpByUrl(url)) {
+            logger.error("Blocked internal IP in url_bypass: " + url);
+            return;
         }
+
+        // Use centralized domain allowlist check to prevent open redirect
+        if (SecurityUtil.checkURL(url) == null) {
+            return;
+        }
+        res.sendRedirect(url);
 
     }
 
@@ -135,9 +144,9 @@ public class URLWhiteList {
 
         for (String whiteHost: whiteDomainlists){
             if (whiteHost.startsWith(".") && host.endsWith(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             } else if (!whiteHost.startsWith(".") && host.equals(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             }
         }
 
