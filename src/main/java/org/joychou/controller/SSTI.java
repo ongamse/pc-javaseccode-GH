@@ -5,26 +5,44 @@ import org.apache.velocity.VelocityContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import org.apache.velocity.app.Velocity;
 
 import java.io.StringWriter;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/ssti")
 public class SSTI {
 
+    // Allowlist of permitted template names to prevent SSTI
+    private static final Set<String> ALLOWED_TEMPLATES = Set.of(
+            "greeting", "contact", "info"
+    );
+
+    // Safe, pre-defined Velocity templates keyed by allowed name
+    private static final java.util.Map<String, String> TEMPLATE_MAP = java.util.Map.of(
+            "greeting", "Hello $author!",
+            "contact", "Contact: $author, $address, $phone",
+            "info", "Author: $author | Address: $address | Phone: $phone"
+    );
+
     /**
-     * SSTI of Java velocity. The latest Velocity version still has this problem.
-     * Fix method: Avoid to use Velocity.evaluate method.
-     * <p>
-     * http://localhost:8080/ssti/velocity?template=%23set($e=%22e%22);$e.getClass().forName(%22java.lang.Runtime%22).getMethod(%22getRuntime%22,null).invoke(null,null).exec(%22open%20-a%20Calculator%22)
-     * Open a calculator in MacOS.
+     * Velocity template rendering endpoint.
+     * User selects a template by name from an allowlist; user input is never
+     * evaluated as template code.
      *
-     * @param template exp
+     * @param template the name of the template to render (must be in the allowlist)
      */
     @GetMapping("/velocity")
-    public void velocity(String template) {
+    public String velocity(String template) {
+        if (template == null || !ALLOWED_TEMPLATES.contains(template)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Invalid template name. Allowed values: " + ALLOWED_TEMPLATES);
+        }
+
         Velocity.init();
 
         VelocityContext context = new VelocityContext();
@@ -34,6 +52,8 @@ public class SSTI {
         context.put("phone", "555-1337");
 
         StringWriter swOut = new StringWriter();
-        Velocity.evaluate(context, swOut, "test", template);
+        // Evaluate only the pre-defined template content, never user-supplied code
+        Velocity.evaluate(context, swOut, "test", TEMPLATE_MAP.get(template));
+        return swOut.toString();
     }
 }
