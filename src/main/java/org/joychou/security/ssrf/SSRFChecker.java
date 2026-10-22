@@ -59,12 +59,22 @@ public class SSRFChecker {
      */
     public static boolean checkSSRF(String url, int checkTimes) {
 
+        if (url == null || !SecurityUtil.isHttp(url)) {
+            return false;
+        }
+
         HttpURLConnection connection;
         int connectTime = 5 * 1000;  // 设置连接超时时间5s
         int i = 1;
         String finalUrl = url;
         try {
             do {
+                // Enforce HTTP(S) on every redirect
+                if (!SecurityUtil.isHttp(finalUrl)) {
+                    logger.error("[-] SSRF check failed. Non-HTTP redirect: " + finalUrl);
+                    return false;
+                }
+
                 // 判断当前请求的URL是否是内网ip
                 if (isInternalIpByUrl(finalUrl)) {
                     logger.error("[-] SSRF check failed. Dangerous url: " + finalUrl);
@@ -93,7 +103,8 @@ public class SSRFChecker {
             } while (connection.getResponseCode() != HttpURLConnection.HTTP_OK);
             connection.disconnect();
         } catch (Exception e) {
-            return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
+            logger.error("[-] SSRF check exception, failing closed: " + e.getMessage());
+            return false;  // Fail closed: treat exceptions as unsafe
         }
         return true; // 默认返回true
     }

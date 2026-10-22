@@ -118,6 +118,12 @@ public class SSRF {
      */
     @GetMapping("/openStream")
     public void openStream(@RequestParam String url, HttpServletResponse response) throws IOException {
+        // SSRF protection: enforce HTTP(S) and block internal IPs
+        if (!SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Blocked: URL failed SSRF validation");
+            return;
+        }
+
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {
@@ -309,10 +315,20 @@ public class SSRF {
     @GetMapping("/dnsrebind/vuln")
     public String DnsRebind(String url) {
         java.security.Security.setProperty("networkaddress.cache.negative.ttl" , "0");
+        if (!SecurityUtil.isHttp(url)) {
+            return "[-] Only HTTP/HTTPS protocols are allowed";
+        }
         if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
             return "Dangerous url";
         }
-        return HttpUtil.get(url);
+        try {
+            SecurityUtil.startSSRFHook();
+            return HttpUtil.get(url);
+        } catch (Exception e) {
+            return e.getMessage();
+        } finally {
+            SecurityUtil.stopSSRFHook();
+        }
     }
 
 

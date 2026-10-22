@@ -105,14 +105,24 @@ public class URLWhiteList {
             return;
         }
 
-        URL u = new URL(url);
-        String host = u.getHost();
+        // Use URI-based host extraction (not java.net.URL) to prevent parser-differential bypass
+        String host = SecurityUtil.gethost(url);
+        if (host == null || host.isEmpty()) {
+            return;
+        }
         logger.info("host:  " + host);
+
+        // Block requests to internal/private IP ranges
+        if (org.joychou.security.ssrf.SSRFChecker.isInternalIpByUrl(url)) {
+            logger.error("Blocked internal IP in url_bypass: " + url);
+            return;
+        }
 
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
                 res.sendRedirect(url);
+                return;
             }
         }
 

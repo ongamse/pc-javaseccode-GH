@@ -12,6 +12,8 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
 import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
+import org.joychou.security.SecurityUtil;
+import org.joychou.security.ssrf.SSRFChecker;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.slf4j.Logger;
@@ -35,7 +37,26 @@ public class HttpUtils {
 
     private final static Logger logger = LoggerFactory.getLogger(HttpUtils.class);
 
+    /**
+     * Validate URL for SSRF: enforce HTTP(S) scheme and block internal/private IPs.
+     *
+     * @param url the URL to validate
+     * @throws IllegalArgumentException if the URL is null, not HTTP(S), or targets an internal IP
+     */
+    private static void validateUrlForSSRF(String url) {
+        if (url == null) {
+            throw new IllegalArgumentException("URL must not be null");
+        }
+        if (!SecurityUtil.isHttp(url)) {
+            throw new IllegalArgumentException("Only HTTP and HTTPS protocols are allowed");
+        }
+        if (SSRFChecker.isInternalIpByUrl(url)) {
+            throw new IllegalArgumentException("Requests to internal network addresses are not allowed");
+        }
+    }
+
     public static String commonHttpClient(String url) {
+        validateUrlForSSRF(url);
 
         HttpClient client = new HttpClient();
         GetMethod method = new GetMethod(url);
@@ -55,6 +76,7 @@ public class HttpUtils {
 
 
     public static String request(String url) {
+        validateUrlForSSRF(url);
         try {
             return Request.Get(url).execute().returnContent().toString();
         } catch (Exception e) {
@@ -64,6 +86,7 @@ public class HttpUtils {
 
 
     public static String httpClient(String url) {
+        validateUrlForSSRF(url);
 
         StringBuilder result = new StringBuilder();
 
@@ -90,6 +113,7 @@ public class HttpUtils {
 
 
     public static String URLConnection(String url) {
+        validateUrlForSSRF(url);
         try {
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
@@ -114,6 +138,7 @@ public class HttpUtils {
      * UserAgent is Java/1.8.0_102.
      */
     public static String HttpURLConnection(String url) {
+        validateUrlForSSRF(url);
         try {
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
@@ -143,6 +168,7 @@ public class HttpUtils {
      * @param url http request url
      */
     public static String Jsoup(String url) {
+        validateUrlForSSRF(url);
         try {
             Document doc = Jsoup.connect(url)
 //                    .followRedirects(false)
@@ -162,6 +188,7 @@ public class HttpUtils {
      * UserAgent is <code>okhttp/2.5.0</code>.
      */
     public static String okhttp(String url) throws IOException {
+        validateUrlForSSRF(url);
         OkHttpClient client = new OkHttpClient();
 //         client.setFollowRedirects(false);
         com.squareup.okhttp.Request ok_http = new com.squareup.okhttp.Request.Builder().url(url).build();
@@ -177,14 +204,9 @@ public class HttpUtils {
      * @param url http request url
      */
     public static void imageIO(String url) {
+        validateUrlForSSRF(url);
         try {
             URL u = new URL(url);
-            // Only allow HTTP(S) schemes to prevent local file read via file:// protocol
-            String protocol = u.getProtocol();
-            if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
-                logger.error("Blocked non-HTTP protocol in imageIO: " + protocol);
-                return;
-            }
             ImageIO.read(u); // send request
         } catch (IOException e) {
             logger.error(e.getMessage());
@@ -200,6 +222,7 @@ public class HttpUtils {
      * @param url http request url
      */
     public static void IOUtils(String url) {
+        validateUrlForSSRF(url);
         try {
             IOUtils.toByteArray(URI.create(url));
         } catch (IOException e) {
@@ -209,6 +232,7 @@ public class HttpUtils {
 
 
     public static String HttpAsyncClients(String url) {
+        validateUrlForSSRF(url);
         CloseableHttpAsyncClient httpclient = HttpAsyncClients.createDefault();
         try {
             httpclient.start();
