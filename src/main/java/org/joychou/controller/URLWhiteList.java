@@ -118,13 +118,11 @@ public class URLWhiteList {
             return;
         }
 
-        // endsWith .
-        for (String domain : domainwhitelist) {
-            if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
-                return;
-            }
+        // Use centralized domain allowlist check to prevent open redirect
+        if (SecurityUtil.checkURL(url) == null) {
+            return;
         }
+        res.sendRedirect(url);
 
     }
 
