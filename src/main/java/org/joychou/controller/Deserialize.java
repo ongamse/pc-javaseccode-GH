@@ -45,7 +45,7 @@ public class Deserialize {
         byte[] decoded = Base64.getDecoder().decode(rememberMe);
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
-        ObjectInputStream in = new ObjectInputStream(bytes);
+        AntObjectInputStream in = new AntObjectInputStream(bytes);  // Use allowlist-based deserialization
         in.readObject();
         in.close();
 
