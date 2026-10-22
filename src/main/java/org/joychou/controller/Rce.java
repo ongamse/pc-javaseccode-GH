@@ -33,8 +33,15 @@ public class Rce {
         Runtime run = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder();
 
+        // Allowlist validation: only allow safe characters (no shell metacharacters)
+        if (cmd == null || !cmd.matches("^[a-zA-Z0-9_./ -]+$")) {
+            return "Invalid command";
+        }
+
         try {
-            Process p = run.exec(cmd);
+            // Use array form to avoid shell interpretation
+            String[] cmdArray = cmd.split("\\s+");
+            Process p = run.exec(cmdArray);
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -65,8 +72,14 @@ public class Rce {
 
         StringBuilder sb = new StringBuilder();
 
+        // Allowlist validation: only allow safe characters (no shell metacharacters)
+        if (cmd == null || !cmd.matches("^[a-zA-Z0-9_./ -]+$")) {
+            return "Invalid command";
+        }
+
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
+            // Use argument array directly without shell invocation to prevent injection
+            String[] arrCmd = cmd.split("\\s+");
             ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
@@ -94,11 +107,16 @@ public class Rce {
      */
     @GetMapping("/jscmd")
     public void jsEngine(String jsurl) throws Exception{
+        // Allowlist validation: only allow http/https URLs with safe characters
+        if (jsurl == null || !jsurl.matches("^https?://[a-zA-Z0-9_./-]+$")) {
+            throw new IllegalArgumentException("Invalid JS URL");
+        }
         // js nashorn javascript ecmascript
         ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
         Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
-        String cmd = String.format("load(\"%s\")", jsurl);
-        engine.eval(cmd, bindings);
+        // Use parameterized binding instead of string interpolation to prevent injection
+        bindings.put("__jsurl", jsurl);
+        engine.eval("load(__jsurl)", bindings);
     }
 
 
@@ -126,6 +144,21 @@ public class Rce {
      */
     @GetMapping("groovy")
     public void groovyshell(String content) {
+        // Allowlist validation: reject dangerous Groovy constructs to prevent RCE
+        if (content == null || content.isEmpty()) {
+            throw new IllegalArgumentException("Content must not be empty");
+        }
+        // Block shell/runtime execution, process creation, class loading, and system calls
+        String lower = content.toLowerCase();
+        if (lower.contains("runtime") || lower.contains("execute") || lower.contains("exec")
+                || lower.contains("processbuilder") || lower.contains("process")
+                || lower.contains("system") || lower.contains("class.forname")
+                || lower.contains("getclass") || lower.contains("import ")
+                || lower.contains("thread") || lower.contains("classloader")
+                || lower.contains("socket") || lower.contains("url")
+                || lower.contains("file") || lower.contains("reflect")) {
+            throw new SecurityException("Blocked: expression contains disallowed constructs");
+        }
         GroovyShell groovyShell = new GroovyShell();
         groovyShell.evaluate(content);
     }
