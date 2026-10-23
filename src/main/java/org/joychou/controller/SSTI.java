@@ -4,6 +4,7 @@ package org.joychou.controller;
 import org.apache.velocity.VelocityContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import org.apache.velocity.app.Velocity;
@@ -24,7 +25,7 @@ public class SSTI {
      * @param template exp
      */
     @GetMapping("/velocity")
-    public void velocity(String template) {
+    public String velocity(@RequestParam(defaultValue = "") String template) {
         Velocity.init();
 
         VelocityContext context = new VelocityContext();
@@ -32,8 +33,11 @@ public class SSTI {
         context.put("author", "Elliot A.");
         context.put("address", "217 E Broadway");
         context.put("phone", "555-1337");
+        // Pass user input as a data variable, not as template code, to prevent SSTI
+        context.put("userInput", template);
 
         StringWriter swOut = new StringWriter();
-        Velocity.evaluate(context, swOut, "test", template);
+        Velocity.evaluate(context, swOut, "test", "$userInput");
+        return swOut.toString();
     }
 }
