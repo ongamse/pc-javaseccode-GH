@@ -40,8 +40,20 @@ public class SecurityUtil {
      */
     public static String gethost(String url) {
         try {
+            if (url == null || !isHttp(url)) {
+                return "";
+            }
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            // Reject URLs with userinfo (e.g. http://evil.com\@trusted.com) to prevent host confusion
+            if (uri.getUserInfo() != null) {
+                return "";
+            }
+            // Reject URLs with non-standard ports that could be abused for port scanning
+            String host = uri.getHost();
+            if (host == null) {
+                return "";
+            }
+            return host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }

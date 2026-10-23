@@ -118,9 +118,17 @@ public class SSRF {
      */
     @GetMapping("/openStream")
     public void openStream(@RequestParam String url, HttpServletResponse response) throws IOException {
+
+        // Validate protocol is http/https to prevent file:// and other protocol SSRF
+        if (!SecurityUtil.isHttp(url)) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Only http/https URLs are allowed");
+            return;
+        }
+
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {
+            SecurityUtil.startSSRFHook();
             String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
             // download
             response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
@@ -134,9 +142,13 @@ public class SSRF {
                 outputStream.write(bytes, 0, length);
             }
 
+        } catch (SSRFException e) {
+            logger.error("SSRF blocked: " + e.getMessage());
+            response.sendError(HttpServletResponse.SC_FORBIDDEN, "SSRF check failed");
         } catch (Exception e) {
             logger.error(e.toString());
         } finally {
+            SecurityUtil.stopSSRFHook();
             if (inputStream != null) {
                 inputStream.close();
             }
