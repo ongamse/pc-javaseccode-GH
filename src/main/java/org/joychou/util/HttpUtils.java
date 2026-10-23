@@ -179,6 +179,12 @@ public class HttpUtils {
     public static void imageIO(String url) {
         try {
             URL u = new URL(url);
+            // Validate URL scheme to prevent file:// path traversal
+            String protocol = u.getProtocol();
+            if (!"http".equals(protocol) && !"https".equals(protocol)) {
+                logger.error("Illegal URL scheme (only http/https allowed): " + protocol);
+                return;
+            }
             ImageIO.read(u); // send request
         } catch (IOException e) {
             logger.error(e.getMessage());
