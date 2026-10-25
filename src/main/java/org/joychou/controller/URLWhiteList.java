@@ -112,14 +112,35 @@ public class URLWhiteList {
         }
         logger.info("host:  " + host);
 
-        // endsWith .
+        // Strict domain whitelist: exact match or subdomain match (dot-prefixed)
+        boolean allowed = false;
         for (String domain : domainwhitelist) {
-            if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
-                return;
+            if (host.equals(domain) || host.endsWith("." + domain)) {
+                allowed = true;
+                break;
             }
         }
 
+        if (!allowed) {
+            return;
+        }
+
+        // Re-validate with URI to prevent parser-discrepancy bypasses
+        try {
+            java.net.URI parsedUri = new java.net.URI(url);
+            String uriHost = parsedUri.getHost();
+            if (uriHost == null || !uriHost.equalsIgnoreCase(host)) {
+                return;
+            }
+            // Reject if userInfo is present (e.g., evil.com\@whitelist.org)
+            if (parsedUri.getUserInfo() != null) {
+                return;
+            }
+        } catch (java.net.URISyntaxException e) {
+            return;
+        }
+
+        res.sendRedirect(url);
     }
 
 
