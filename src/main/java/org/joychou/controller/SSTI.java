@@ -9,22 +9,27 @@ import org.springframework.web.bind.annotation.RestController;
 import org.apache.velocity.app.Velocity;
 
 import java.io.StringWriter;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/ssti")
 public class SSTI {
 
+    // Allowlist: only alphanumeric characters, hyphens, and underscores are permitted
+    // in template names. This prevents Velocity directive injection (# and $ characters).
+    private static final Pattern SAFE_TEMPLATE_NAME = Pattern.compile("^[a-zA-Z0-9_-]+$");
+
     /**
-     * SSTI of Java velocity. The latest Velocity version still has this problem.
-     * Fix method: Avoid to use Velocity.evaluate method.
-     * <p>
-     * http://localhost:8080/ssti/velocity?template=%23set($e=%22e%22);$e.getClass().forName(%22java.lang.Runtime%22).getMethod(%22getRuntime%22,null).invoke(null,null).exec(%22open%20-a%20Calculator%22)
-     * Open a calculator in MacOS.
+     * Velocity template rendering with allowlisted template name to prevent SSTI.
      *
-     * @param template exp
+     * @param template template name (alphanumeric, hyphens, underscores only)
      */
     @GetMapping("/velocity")
-    public void velocity(String template) {
+    public String velocity(String template) {
+        if (template == null || !SAFE_TEMPLATE_NAME.matcher(template).matches()) {
+            return "Invalid template name. Only alphanumeric characters, hyphens, and underscores are allowed.";
+        }
+
         Velocity.init();
 
         VelocityContext context = new VelocityContext();
@@ -35,5 +40,6 @@ public class SSTI {
 
         StringWriter swOut = new StringWriter();
         Velocity.evaluate(context, swOut, "test", template);
+        return swOut.toString();
     }
 }
