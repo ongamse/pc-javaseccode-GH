@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
@@ -53,7 +54,7 @@ public class Rce {
         } catch (Exception e) {
             return e.toString();
         }
-        return sb.toString();
+        return HtmlUtils.htmlEscape(sb.toString());
     }
 
 
@@ -95,8 +96,20 @@ public class Rce {
     @GetMapping("/jscmd")
     public void jsEngine(String jsurl) throws Exception{
         // js nashorn javascript ecmascript
+        // Restrict to a known allowlist of URL patterns to prevent loading arbitrary scripts
+        if (jsurl == null || !jsurl.matches("^https://trusted\\.example\\.com/scripts/[a-zA-Z0-9_-]+\\.js$")) {
+            throw new SecurityException("Script URL not in allowlist");
+        }
         ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
         Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
+        // Remove Java.type access to prevent arbitrary Java class instantiation
+        bindings.remove("Java");
+        bindings.remove("java");
+        bindings.remove("javax");
+        bindings.remove("Packages");
+        bindings.remove("com");
+        bindings.remove("org");
+        bindings.remove("edu");
         String cmd = String.format("load(\"%s\")", jsurl);
         engine.eval(cmd, bindings);
     }
@@ -110,7 +123,7 @@ public class Rce {
      */
     @GetMapping("/vuln/yarm")
     public void yarm(String content) {
-        Yaml y = new Yaml();
+        Yaml y = new Yaml(new SafeConstructor());
         y.load(content);
     }
 

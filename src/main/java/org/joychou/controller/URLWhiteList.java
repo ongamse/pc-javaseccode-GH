@@ -6,9 +6,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.web.util.HtmlUtils;
+
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -104,17 +105,42 @@ public class URLWhiteList {
             return;
         }
 
-        URL u = new URL(url);
-        String host = u.getHost();
+        // Use URI-based host extraction to prevent URL parsing discrepancy bypasses
+        String host = SecurityUtil.gethost(url);
+        if (host.isEmpty()) {
+            return;
+        }
         logger.info("host:  " + host);
 
-        // endsWith .
+        // Strict domain whitelist: exact match or subdomain match (dot-prefixed)
+        boolean allowed = false;
         for (String domain : domainwhitelist) {
-            if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+            if (host.equals(domain) || host.endsWith("." + domain)) {
+                allowed = true;
+                break;
             }
         }
 
+        if (!allowed) {
+            return;
+        }
+
+        // Re-validate with URI to prevent parser-discrepancy bypasses
+        try {
+            java.net.URI parsedUri = new java.net.URI(url);
+            String uriHost = parsedUri.getHost();
+            if (uriHost == null || !uriHost.equalsIgnoreCase(host)) {
+                return;
+            }
+            // Reject if userInfo is present (e.g., evil.com\@whitelist.org)
+            if (parsedUri.getUserInfo() != null) {
+                return;
+            }
+        } catch (java.net.URISyntaxException e) {
+            return;
+        }
+
+        res.sendRedirect(url);
     }
 
 
@@ -135,9 +161,9 @@ public class URLWhiteList {
 
         for (String whiteHost: whiteDomainlists){
             if (whiteHost.startsWith(".") && host.endsWith(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             } else if (!whiteHost.startsWith(".") && host.equals(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             }
         }
 

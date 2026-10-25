@@ -40,8 +40,15 @@ public class SecurityUtil {
      */
     public static String gethost(String url) {
         try {
+            if (!isHttp(url)) {
+                return "";
+            }
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            if (host == null) {
+                return "";
+            }
+            return host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
@@ -247,6 +254,20 @@ public class SecurityUtil {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Sanitize a string for safe use in an HTTP header value by removing
+     * CR (\r) and LF (\n) characters that could cause HTTP response splitting.
+     *
+     * @param value the header value to sanitize
+     * @return sanitized value with CR/LF removed, or empty string if null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replaceAll("[\\r\\n]", "");
     }
 
     public static void main(String[] args) {

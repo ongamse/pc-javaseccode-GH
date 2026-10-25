@@ -11,7 +11,9 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import java.sql.*;
+import java.util.Collections;
 import java.util.List;
+import java.util.regex.Pattern;
 
 
 /**
@@ -27,6 +29,11 @@ public class SQLI {
 
     private static final Logger logger = LoggerFactory.getLogger(SQLI.class);
 
+    /**
+     * Allowlist pattern for usernames: alphanumeric, underscore, hyphen, dot; 1-64 chars.
+     */
+    private static final Pattern USERNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_.\\-]{1,64}$");
+
     // com.mysql.jdbc.Driver is deprecated. Change to com.mysql.cj.jdbc.Driver.
     private static final String driver = "com.mysql.cj.jdbc.Driver";
 
@@ -41,6 +48,16 @@ public class SQLI {
 
     @Resource
     private UserMapper userMapper;
+
+    /**
+     * Validate that a username matches the expected format.
+     *
+     * @param username the user-supplied username
+     * @return true if valid, false otherwise
+     */
+    private boolean isValidUsername(String username) {
+        return username != null && USERNAME_PATTERN.matcher(username).matches();
+    }
 
 
     /**
@@ -60,11 +77,12 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connect to database successfully.");
 
-            // sqli vuln code
-            Statement statement = con.createStatement();
-            String sql = "select * from users where username = '" + username + "'";
-            logger.info(sql);
-            ResultSet rs = statement.executeQuery(sql);
+            // parameterized query to prevent SQL injection
+            String sql = "select * from users where username = ?";
+            PreparedStatement st = con.prepareStatement(sql);
+            st.setString(1, username);
+            logger.info(st.toString());
+            ResultSet rs = st.executeQuery();
 
             while (rs.next()) {
                 String res_name = rs.getString("username");
@@ -93,6 +111,10 @@ public class SQLI {
      */
     @RequestMapping("/jdbc/sec")
     public String jdbc_sqli_sec(@RequestParam("username") String username) {
+
+        if (!isValidUsername(username)) {
+            return "Invalid username.";
+        }
 
         StringBuilder result = new StringBuilder();
         try {
@@ -146,8 +168,9 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connecting to Database successfully.");
 
-            String sql = "select * from users where username = '" + username + "'";
+            String sql = "select * from users where username = ?";
             PreparedStatement st = con.prepareStatement(sql);
+            st.setString(1, username);
 
             logger.info(st.toString());
             ResultSet rs = st.executeQuery();
@@ -180,6 +203,9 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln01")
     public List<User> mybatisVuln01(@RequestParam("username") String username) {
+        if (!isValidUsername(username)) {
+            return Collections.emptyList();
+        }
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -190,6 +216,9 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln02")
     public List<User> mybatisVuln02(@RequestParam("username") String username) {
+        if (!isValidUsername(username)) {
+            return Collections.emptyList();
+        }
         return userMapper.findByUserNameVuln02(username);
     }
 
@@ -210,6 +239,9 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec01")
     public User mybatisSec01(@RequestParam("username") String username) {
+        if (!isValidUsername(username)) {
+            return null;
+        }
         return userMapper.findByUserName(username);
     }
 
@@ -219,6 +251,9 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec02")
     public User mybatisSec02(@RequestParam("id") Integer id) {
+        if (id == null || id <= 0) {
+            return null;
+        }
         return userMapper.findById(id);
     }
 

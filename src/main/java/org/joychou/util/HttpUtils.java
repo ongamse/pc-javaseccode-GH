@@ -14,6 +14,7 @@ import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import org.joychou.security.ssrf.SSRFChecker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +38,7 @@ public class HttpUtils {
 
     public static String commonHttpClient(String url) {
 
+        SSRFChecker.validateURLSafe(url);
         HttpClient client = new HttpClient();
         GetMethod method = new GetMethod(url);
 
@@ -56,6 +58,7 @@ public class HttpUtils {
 
     public static String request(String url) {
         try {
+            SSRFChecker.validateURLSafe(url);
             return Request.Get(url).execute().returnContent().toString();
         } catch (Exception e) {
             return e.getMessage();
@@ -65,6 +68,7 @@ public class HttpUtils {
 
     public static String httpClient(String url) {
 
+        SSRFChecker.validateURLSafe(url);
         StringBuilder result = new StringBuilder();
 
         try {
@@ -91,6 +95,7 @@ public class HttpUtils {
 
     public static String URLConnection(String url) {
         try {
+            SSRFChecker.validateURLSafe(url);
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
             BufferedReader in = new BufferedReader(new InputStreamReader(urlConnection.getInputStream())); //send request
@@ -115,6 +120,7 @@ public class HttpUtils {
      */
     public static String HttpURLConnection(String url) {
         try {
+            SSRFChecker.validateURLSafe(url);
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
             HttpURLConnection conn = (HttpURLConnection) urlConnection;
@@ -144,6 +150,7 @@ public class HttpUtils {
      */
     public static String Jsoup(String url) {
         try {
+            SSRFChecker.validateURLSafe(url);
             Document doc = Jsoup.connect(url)
 //                    .followRedirects(false)
                     .timeout(3000)
@@ -162,6 +169,7 @@ public class HttpUtils {
      * UserAgent is <code>okhttp/2.5.0</code>.
      */
     public static String okhttp(String url) throws IOException {
+        SSRFChecker.validateURLSafe(url);
         OkHttpClient client = new OkHttpClient();
 //         client.setFollowRedirects(false);
         com.squareup.okhttp.Request ok_http = new com.squareup.okhttp.Request.Builder().url(url).build();
@@ -178,6 +186,7 @@ public class HttpUtils {
      */
     public static void imageIO(String url) {
         try {
+            SSRFChecker.validateURLSafe(url);
             URL u = new URL(url);
             ImageIO.read(u); // send request
         } catch (IOException e) {
@@ -195,6 +204,7 @@ public class HttpUtils {
      */
     public static void IOUtils(String url) {
         try {
+            SSRFChecker.validateURLSafe(url);
             IOUtils.toByteArray(URI.create(url));
         } catch (IOException e) {
             logger.error(e.getMessage());
@@ -203,6 +213,7 @@ public class HttpUtils {
 
 
     public static String HttpAsyncClients(String url) {
+        SSRFChecker.validateURLSafe(url);
         CloseableHttpAsyncClient httpclient = HttpAsyncClients.createDefault();
         try {
             httpclient.start();

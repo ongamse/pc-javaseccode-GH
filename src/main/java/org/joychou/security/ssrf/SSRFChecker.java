@@ -65,6 +65,12 @@ public class SSRFChecker {
         String finalUrl = url;
         try {
             do {
+                // Reject non-HTTP(S) schemes
+                if (!SecurityUtil.isHttp(finalUrl)) {
+                    logger.error("[-] SSRF check failed. Non-HTTP scheme: " + finalUrl);
+                    return false;
+                }
+
                 // 判断当前请求的URL是否是内网ip
                 if (isInternalIpByUrl(finalUrl)) {
                     logger.error("[-] SSRF check failed. Dangerous url: " + finalUrl);
@@ -93,7 +99,8 @@ public class SSRFChecker {
             } while (connection.getResponseCode() != HttpURLConnection.HTTP_OK);
             connection.disconnect();
         } catch (Exception e) {
-            return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
+            logger.error("[-] SSRF check exception, fail-closed: " + e.getMessage());
+            return false;  // Fail-closed: exceptions are treated as unsafe
         }
         return true; // 默认返回true
     }
@@ -105,6 +112,11 @@ public class SSRFChecker {
      * @return 如果是内网IP，返回true；非内网IP，返回false。
      */
     public static boolean isInternalIpByUrl(String url) {
+
+        // Reject non-HTTP(S) schemes
+        if (!SecurityUtil.isHttp(url)) {
+            return true;
+        }
 
         String host = url2host(url);
         if (host.equals("")) {
@@ -132,9 +144,27 @@ public class SSRFChecker {
             return true;
         }
 
+        // Block IPv6 loopback and private addresses
+        String ipLower = strIP.toLowerCase();
+        if ("0:0:0:0:0:0:0:1".equals(strIP) || "::1".equals(strIP)) {
+            logger.error("[-] SSRF check failed. IPv6 loopback: " + strIP);
+            return true;
+        }
+        if (ipLower.startsWith("fd") || ipLower.startsWith("fe80:")) {
+            logger.error("[-] SSRF check failed. IPv6 private/link-local: " + strIP);
+            return true;
+        }
+
+        // Block IPv4 link-local (169.254.0.0/16), includes AWS metadata endpoint 169.254.169.254
+        if (strIP.startsWith("169.254.")) {
+            logger.error("[-] SSRF check failed. Link-local IP: " + strIP);
+            return true;
+        }
+
         ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
         for (String subnet : blackSubnets) {
             SubnetUtils utils = new SubnetUtils(subnet);
+            utils.setInclusiveHostCount(true);
             if (utils.getInfo().isInRange(strIP)) {
                 logger.error("[-] SSRF check failed. Internal IP: " + strIP);
                 return true;
@@ -282,6 +312,65 @@ public class SSRFChecker {
             }
         }
         return true;
+    }
+
+    /**
+     * Validate a URL is safe from SSRF: must be http/https, must not resolve to an internal IP.
+     *
+     * @param url the URL to validate
+     * @throws SSRFException if the URL is unsafe
+     */
+    public static void validateURLSafe(String url) {
+        if (url == null || url.isEmpty()) {
+            throw new SSRFException("SSRF validation failed: URL is null or empty");
+        }
+        if (!SecurityUtil.isHttp(url)) {
+            throw new SSRFException("SSRF validation failed: non-HTTP(S) scheme in URL");
+        }
+        if (isInternalIpByUrl(url)) {
+            throw new SSRFException("SSRF validation failed: URL resolves to internal/blocked IP");
+        }
+    }
+
+    /**
+     * Validate a JDBC URL is safe from SSRF: extract the host and check it is not internal.
+     *
+     * @param jdbcUrl the JDBC connection URL
+     * @throws SSRFException if the URL targets an internal host
+     */
+    public static void validateJdbcURLSafe(String jdbcUrl) {
+        if (jdbcUrl == null || jdbcUrl.isEmpty()) {
+            throw new SSRFException("SSRF validation failed: JDBC URL is null or empty");
+        }
+        try {
+            // JDBC URLs typically have the form jdbc:subprotocol://host:port/database
+            // Extract the part after jdbc:subprotocol:
+            int doubleSlashIdx = jdbcUrl.indexOf("//");
+            if (doubleSlashIdx < 0) {
+                return; // No host component (e.g. jdbc:sqlite:file.db) -- not network SSRF
+            }
+            String afterSlashes = jdbcUrl.substring(doubleSlashIdx + 2);
+            // Host ends at '/', '?', or ':'
+            int endIdx = afterSlashes.length();
+            for (char delim : new char[]{'/', '?', ':'}) {
+                int idx = afterSlashes.indexOf(delim);
+                if (idx >= 0 && idx < endIdx) {
+                    endIdx = idx;
+                }
+            }
+            String host = afterSlashes.substring(0, endIdx);
+            if (host.isEmpty()) {
+                return;
+            }
+            String ip = host2ip(host);
+            if (!ip.isEmpty() && isInternalIp(ip)) {
+                throw new SSRFException("SSRF validation failed: JDBC URL host resolves to internal IP");
+            }
+        } catch (SSRFException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new SSRFException("SSRF validation failed: cannot parse JDBC URL host - " + e.getMessage());
+        }
     }
 
     /**
