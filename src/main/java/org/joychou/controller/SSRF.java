@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 import cn.hutool.http.HttpUtil;
 import org.joychou.security.SecurityUtil;
+import org.joychou.security.ssrf.SSRFChecker;
 import org.joychou.security.ssrf.SSRFException;
 import org.joychou.service.HttpService;
 import org.joychou.util.HttpUtils;
@@ -122,6 +123,7 @@ public class SSRF {
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {
+            SSRFChecker.validateURLSafe(url);
             String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
             // download
             response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
