@@ -43,7 +43,17 @@ public class SSRF {
      */
     @RequestMapping(value = "/urlConnection/vuln", method = {RequestMethod.POST, RequestMethod.GET})
     public String URLConnectionVuln(String url) {
-        return HttpUtils.URLConnection(url);
+        if (!SecurityUtil.isHttp(url)) {
+            return "[-] SSRF check failed";
+        }
+        try {
+            SecurityUtil.startSSRFHook();
+            return HttpUtils.URLConnection(url);
+        } catch (SSRFException | IOException e) {
+            return e.getMessage();
+        } finally {
+            SecurityUtil.stopSSRFHook();
+        }
     }
 
 
@@ -86,7 +96,17 @@ public class SSRF {
 
     @GetMapping("/HttpURLConnection/vuln")
     public String httpURLConnectionVuln(@RequestParam String url) {
-        return HttpUtils.HttpURLConnection(url);
+        if (!SecurityUtil.isHttp(url)) {
+            return "[-] SSRF check failed";
+        }
+        try {
+            SecurityUtil.startSSRFHook();
+            return HttpUtils.HttpURLConnection(url);
+        } catch (SSRFException | IOException e) {
+            return e.getMessage();
+        } finally {
+            SecurityUtil.stopSSRFHook();
+        }
     }
 
     /**
@@ -117,10 +137,17 @@ public class SSRF {
      */
     @GetMapping("/openStream")
     public void openStream(@RequestParam String url, HttpServletResponse response) throws IOException {
+        if (!SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.getWriter().write("[-] SSRF check failed");
+            return;
+        }
+
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {
-            String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
+            String downLoadImgFileName = SecurityUtil.sanitizeHeaderValue(
+                    WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url));
             // download
             response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
 
@@ -264,7 +291,17 @@ public class SSRF {
      */
     @GetMapping("/HttpSyncClients/vuln")
     public String HttpSyncClients(@RequestParam("url") String url) {
-        return HttpUtils.HttpAsyncClients(url);
+        if (!SecurityUtil.isHttp(url)) {
+            return "[-] SSRF check failed";
+        }
+        try {
+            SecurityUtil.startSSRFHook();
+            return HttpUtils.HttpAsyncClients(url);
+        } catch (SSRFException | IOException e) {
+            return e.getMessage();
+        } finally {
+            SecurityUtil.stopSSRFHook();
+        }
     }
 
 
@@ -276,6 +313,9 @@ public class SSRF {
      */
     @GetMapping("/restTemplate/vuln1")
     public String RestTemplateUrlBanRedirects(String url){
+        if (!SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "[-] SSRF check failed";
+        }
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON_UTF8);
         return httpService.RequestHttpBanRedirects(url, headers);
@@ -284,6 +324,9 @@ public class SSRF {
 
     @GetMapping("/restTemplate/vuln2")
     public String RestTemplateUrl(String url){
+        if (!SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "[-] SSRF check failed";
+        }
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON_UTF8);
         return httpService.RequestHttp(url, headers);
@@ -297,6 +340,9 @@ public class SSRF {
      */
     @GetMapping("/hutool/vuln")
     public String hutoolHttp(String url){
+        if (!SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "[-] SSRF check failed";
+        }
         return HttpUtil.get(url);
     }
 

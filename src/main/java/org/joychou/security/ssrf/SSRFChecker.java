@@ -132,6 +132,20 @@ public class SSRFChecker {
             return true;
         }
 
+        // Reject loopback, link-local, and any private/reserved IPs after DNS resolution
+        try {
+            InetAddress addr = InetAddress.getByName(strIP);
+            if (addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                    || addr.isSiteLocalAddress() || addr.isAnyLocalAddress()
+                    || addr.isMulticastAddress()) {
+                logger.error("[-] SSRF check failed. Reserved/internal IP: " + strIP);
+                return true;
+            }
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Cannot parse IP: " + strIP);
+            return true;
+        }
+
         ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
         for (String subnet : blackSubnets) {
             SubnetUtils utils = new SubnetUtils(subnet);

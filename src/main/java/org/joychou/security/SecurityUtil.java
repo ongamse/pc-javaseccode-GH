@@ -18,6 +18,7 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern USERNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_]{1,64}$");
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -146,6 +147,10 @@ public class SecurityUtil {
         if(url == null) {
             return false;
         }
+        // Only allow http/https protocols
+        if (!isHttp(url)) {
+            return false;
+        }
         return !SSRFChecker.isInternalIpByUrl(url);
     }
 
@@ -215,6 +220,20 @@ public class SecurityUtil {
      * @param sql sql
      * @return 安全sql，否则返回null
      */
+    /**
+     * Validate username input: alphanumeric and underscore only, 1-64 chars.
+     *
+     * @param username the username to validate
+     * @return the validated username
+     * @throws IllegalArgumentException if the username is null or invalid
+     */
+    public static String validateUsername(String username) {
+        if (username == null || !USERNAME_PATTERN.matcher(username).matches()) {
+            throw new IllegalArgumentException("Invalid username format");
+        }
+        return username;
+    }
+
     public static String sqlFilter(String sql) {
         if (!FILTER_PATTERN.matcher(sql).matches()) {
             return null;
@@ -247,6 +266,21 @@ public class SecurityUtil {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Sanitize a value intended for use in an HTTP header by stripping
+     * carriage-return (\r) and line-feed (\n) characters to prevent
+     * CRLF / header injection.
+     *
+     * @param value the raw header value
+     * @return the sanitized value, or null if input was null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replaceAll("[\\r\\n]", "");
     }
 
     public static void main(String[] args) {

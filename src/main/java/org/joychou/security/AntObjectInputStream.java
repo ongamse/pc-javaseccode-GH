@@ -27,6 +27,22 @@ public class AntObjectInputStream extends ObjectInputStream {
      * 但是RASP是通过HOOK java/io/ObjectInputStream类的resolveClass方法，全局的检测白名单。
      *
      */
+    // Allowlist of safe class prefixes permitted for deserialization
+    private static final String[] ALLOWED_CLASS_PREFIXES = {
+            "org.joychou.",
+            "java.lang.",
+            "java.util.",
+            "java.math.",
+            "[B", // byte array
+            "[C", // char array
+            "[I", // int array
+            "[J", // long array
+            "[S", // short array
+            "[D", // double array
+            "[F", // float array
+            "[Z"  // boolean array
+    };
+
     @Override
     protected Class<?> resolveClass(final ObjectStreamClass desc)
             throws IOException, ClassNotFoundException
@@ -36,17 +52,14 @@ public class AntObjectInputStream extends ObjectInputStream {
         // Deserialize class name: org.joychou.security.AntObjectInputStream$MyObject
         logger.info("Deserialize class name: " + className);
 
-        String[] denyClasses = {"java.net.InetAddress",
-                                "org.apache.commons.collections.Transformer",
-                                "org.apache.commons.collections.functors"};
-
-        for (String denyClass : denyClasses) {
-            if (className.startsWith(denyClass)) {
-                throw new InvalidClassException("Unauthorized deserialization attempt", className);
+        // Allowlist: only permit known safe classes for deserialization
+        for (String allowedPrefix : ALLOWED_CLASS_PREFIXES) {
+            if (className.startsWith(allowedPrefix)) {
+                return super.resolveClass(desc);
             }
         }
 
-        return super.resolveClass(desc);
+        throw new InvalidClassException("Unauthorized deserialization attempt — class not in allowlist", className);
     }
 
     public static void main(String args[]) throws Exception{
