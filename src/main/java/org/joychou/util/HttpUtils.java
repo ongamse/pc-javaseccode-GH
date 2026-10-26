@@ -14,6 +14,7 @@ import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +37,9 @@ public class HttpUtils {
     private final static Logger logger = LoggerFactory.getLogger(HttpUtils.class);
 
     public static String commonHttpClient(String url) {
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "Error: SSRF check failed - URL targets internal network";
+        }
 
         HttpClient client = new HttpClient();
         GetMethod method = new GetMethod(url);
@@ -55,6 +59,9 @@ public class HttpUtils {
 
 
     public static String request(String url) {
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "Error: SSRF check failed - URL targets internal network";
+        }
         try {
             return Request.Get(url).execute().returnContent().toString();
         } catch (Exception e) {
@@ -64,6 +71,9 @@ public class HttpUtils {
 
 
     public static String httpClient(String url) {
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "Error: SSRF check failed - URL targets internal network";
+        }
 
         StringBuilder result = new StringBuilder();
 
@@ -90,6 +100,9 @@ public class HttpUtils {
 
 
     public static String URLConnection(String url) {
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "Error: SSRF check failed - URL targets internal network";
+        }
         try {
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
@@ -114,6 +127,9 @@ public class HttpUtils {
      * UserAgent is Java/1.8.0_102.
      */
     public static String HttpURLConnection(String url) {
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "Error: SSRF check failed - URL targets internal network";
+        }
         try {
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
@@ -143,6 +159,9 @@ public class HttpUtils {
      * @param url http request url
      */
     public static String Jsoup(String url) {
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "Error: SSRF check failed - URL targets internal network";
+        }
         try {
             Document doc = Jsoup.connect(url)
 //                    .followRedirects(false)
@@ -162,6 +181,9 @@ public class HttpUtils {
      * UserAgent is <code>okhttp/2.5.0</code>.
      */
     public static String okhttp(String url) throws IOException {
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "Error: SSRF check failed - URL targets internal network";
+        }
         OkHttpClient client = new OkHttpClient();
 //         client.setFollowRedirects(false);
         com.squareup.okhttp.Request ok_http = new com.squareup.okhttp.Request.Builder().url(url).build();
@@ -177,6 +199,10 @@ public class HttpUtils {
      * @param url http request url
      */
     public static void imageIO(String url) {
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            logger.error("SSRF check failed - URL targets internal network");
+            return;
+        }
         try {
             URL u = new URL(url);
             // Validate URL scheme to prevent local file access via file:// protocol
@@ -206,6 +232,10 @@ public class HttpUtils {
      * @param url http request url
      */
     public static void IOUtils(String url) {
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            logger.error("SSRF check failed - URL targets internal network");
+            return;
+        }
         try {
             IOUtils.toByteArray(URI.create(url));
         } catch (IOException e) {
@@ -215,6 +245,9 @@ public class HttpUtils {
 
 
     public static String HttpAsyncClients(String url) {
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            return "Error: SSRF check failed - URL targets internal network";
+        }
         CloseableHttpAsyncClient httpclient = HttpAsyncClients.createDefault();
         try {
             httpclient.start();

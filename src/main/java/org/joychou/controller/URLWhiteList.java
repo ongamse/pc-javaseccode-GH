@@ -112,6 +112,12 @@ public class URLWhiteList {
         // Strict domain match: exact match or subdomain (.<domain>)
         for (String domain : domainwhitelist) {
             if (host.equals(domain) || host.endsWith("." + domain)) {
+                // Also check the resolved IP is not internal to prevent SSRF via DNS rebinding
+                if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+                    res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    res.getWriter().write("url resolves to internal IP");
+                    return;
+                }
                 res.sendRedirect(url);
                 return;
             }

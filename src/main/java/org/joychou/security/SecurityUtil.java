@@ -147,6 +147,10 @@ public class SecurityUtil {
         if(url == null) {
             return false;
         }
+        // Only allow http/https protocols
+        if (!isHttp(url)) {
+            return false;
+        }
         return !SSRFChecker.isInternalIpByUrl(url);
     }
 
