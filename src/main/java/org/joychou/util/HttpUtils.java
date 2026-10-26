@@ -179,6 +179,18 @@ public class HttpUtils {
     public static void imageIO(String url) {
         try {
             URL u = new URL(url);
+            // Validate URL scheme to prevent local file access via file:// protocol
+            String protocol = u.getProtocol();
+            if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
+                logger.error("Blocked non-HTTP URL scheme: " + protocol);
+                return;
+            }
+            // Validate that URL path does not contain traversal sequences
+            String urlPath = u.getPath();
+            if (urlPath != null && urlPath.contains("..")) {
+                logger.error("Blocked URL with path traversal");
+                return;
+            }
             ImageIO.read(u); // send request
         } catch (IOException e) {
             logger.error(e.getMessage());
