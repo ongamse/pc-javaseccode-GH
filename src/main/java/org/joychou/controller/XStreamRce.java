@@ -24,6 +24,11 @@ public class XStreamRce {
     public String parseXml(HttpServletRequest request) throws Exception {
         String xml = WebUtils.getRequestBody(request);
         XStream xstream = new XStream(new DomDriver());
+        // Restrict XStream to only allow safe, expected types to prevent XXE and RCE
+        xstream.addPermission(com.thoughtworks.xstream.security.NoTypePermission.NONE);
+        xstream.addPermission(com.thoughtworks.xstream.security.NullPermission.NULL);
+        xstream.addPermission(com.thoughtworks.xstream.security.PrimitiveTypePermission.PRIMITIVES);
+        xstream.allowTypesByWildcard(new String[]{"org.joychou.**"});
         xstream.fromXML(xml);
         return "xstream";
     }

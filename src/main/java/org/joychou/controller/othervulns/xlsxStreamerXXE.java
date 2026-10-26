@@ -9,21 +9,35 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.xml.XMLConstants;
 import java.io.FileInputStream;
 import java.io.IOException;
 
 
 /**
- * Desc:  xlsx-streamer xxe vuln code
+ * Desc:  xlsx-streamer xxe - secured via system properties disabling external entities
  * Usage: xl/workbook.xml
  * Ref:   https://www.itread01.com/hkpcyyp.html
- * Fix:   update xlsx-streamer to 2.1.0 or above
  *
  * @author JoyChou @2019-09-05
  */
 @Controller
 @RequestMapping("xlsx-streamer")
 public class xlsxStreamerXXE {
+
+    /**
+     * Set JVM-wide system properties so that any SAXParserFactory.newInstance()
+     * call (including inside xlsx-streamer) produces a parser with external
+     * entities and DTDs disabled. This is the code-level mitigation when the
+     * library does not expose parser configuration.
+     */
+    private static void setSecureXmlDefaults() {
+        System.setProperty("javax.xml.parsers.SAXParserFactory",
+                "com.sun.org.apache.xerces.internal.jaxp.SAXParserFactoryImpl");
+        // ACCESS_EXTERNAL_DTD and ACCESS_EXTERNAL_SCHEMA empty = disallow all
+        System.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        System.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+    }
 
 
     @GetMapping("/upload")
@@ -34,11 +48,13 @@ public class xlsxStreamerXXE {
 
     @PostMapping("/readxlsx")
     public void xllx_streamer_xxe(MultipartFile file) throws IOException {
+        setSecureXmlDefaults();
         StreamingReader.builder().open(file.getInputStream());
     }
 
 
     public static void main(String[] args) throws Exception {
+        setSecureXmlDefaults();
         StreamingReader.builder().open((new FileInputStream("poc.xlsx")));
     }
 }
