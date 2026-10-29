@@ -46,6 +46,25 @@ public class WebUtils {
         return input == null ? null : HtmlUtils.htmlEscape(input);
     }
 
+    /**
+     * Remove CR, LF and all other ISO control characters from an untrusted value before it is
+     * written into an HTTP response header (prevents header injection / response splitting).
+     * Null-safe: null stays null.
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
     public static String json2Jsonp(String callback, String jsonStr) {
         if (!isValidJsonpCallback(callback)) {
             return "error";
