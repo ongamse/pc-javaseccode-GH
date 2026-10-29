@@ -115,10 +115,12 @@ public class URLWhiteList {
             if (host.endsWith("." + domain)) {
                 // Never redirect to a URL whose real (RFC 3986) host differs from the checked host,
                 // or that points at an internal address.
-                if (!host.equalsIgnoreCase(SecurityUtil.gethost(url)) || !SSRFChecker.isSafeOutboundUrl(url)) {
+                String safeUrl = SecurityUtil.checkRedirectURL(url);
+                if (safeUrl == null || !host.equalsIgnoreCase(SecurityUtil.gethost(safeUrl))
+                        || !SSRFChecker.isSafeOutboundUrl(safeUrl)) {
                     return;
                 }
-                res.sendRedirect(url);
+                res.sendRedirect(safeUrl);
                 return;
             }
         }
