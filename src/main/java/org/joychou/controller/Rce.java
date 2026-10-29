@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
+import org.joychou.security.SecurityUtil;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,6 +17,8 @@ import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.sql.DriverManager;
+import java.util.List;
+import java.util.regex.Pattern;
 
 
 /**
@@ -28,13 +31,20 @@ import java.sql.DriverManager;
 @RequestMapping("/rce")
 public class Rce {
 
+    private static final Pattern GROOVY_SAFE_EXPR = Pattern.compile("^[0-9+\\-*/%(). ]{1,100}$");
+
     @GetMapping("/runtime/exec")
     public String CommandExec(String cmd) {
-        Runtime run = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder();
 
+        // Allowlisted command + strictly validated args, executed as argv (no shell).
+        List<String> argv = SecurityUtil.parseAllowedCommand(cmd);
+        if (null == argv) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            Process p = run.exec(cmd);
+            Process p = new ProcessBuilder(argv).start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -65,9 +75,14 @@ public class Rce {
 
         StringBuilder sb = new StringBuilder();
 
+        // Allowlisted command + strictly validated args, executed as argv (no shell).
+        List<String> argv = SecurityUtil.parseAllowedCommand(cmd);
+        if (null == argv) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
-            ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
+            ProcessBuilder processBuilder = new ProcessBuilder(argv);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
@@ -94,11 +109,16 @@ public class Rce {
      */
     @GetMapping("/jscmd")
     public void jsEngine(String jsurl) throws Exception{
+        // Only scripts from allowlisted (trusted) hosts may be loaded.
+        if (null == jsurl || !SecurityUtil.checkSSRFByWhitehosts(jsurl)) {
+            return;
+        }
         // js nashorn javascript ecmascript
         ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
         Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
-        String cmd = String.format("load(\"%s\")", jsurl);
-        engine.eval(cmd, bindings);
+        // The URL is passed as a binding, never concatenated into the evaluated source.
+        bindings.put("jsurl", jsurl);
+        engine.eval("load(jsurl)", bindings);
     }
 
 
@@ -126,6 +146,10 @@ public class Rce {
      */
     @GetMapping("groovy")
     public void groovyshell(String content) {
+        // Only plain arithmetic expressions are accepted; no identifiers, method calls or strings.
+        if (null == content || !GROOVY_SAFE_EXPR.matcher(content).matches()) {
+            return;
+        }
         GroovyShell groovyShell = new GroovyShell();
         groovyShell.evaluate(content);
     }

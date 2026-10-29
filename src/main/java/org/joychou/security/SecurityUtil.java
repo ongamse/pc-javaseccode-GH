@@ -17,13 +17,19 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
-    private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "date", "uptime", "hostname", "pwd", "uname", "ls"));
+    private static Logger logger =LoggerFactory.getLogger(SecurityUtil.class);
 
 
     /**
@@ -242,11 +248,42 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Parse a user supplied command line into an argv list without involving a shell.
+     * Only commands in a fixed read-only allowlist are accepted, and every argument must
+     * match the strict <code>a-zA-Z0-9_/.-</code> pattern.
+     *
+     * @param cmdLine the user supplied command line, e.g. "ls -la /tmp"
+     * @return argv list safe for ProcessBuilder (no shell), or null if not allowed
+     */
+    public static List<String> parseAllowedCommand(String cmdLine) {
+        if (null == cmdLine) {
+            return null;
+        }
+        String trimmed = cmdLine.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        String[] tokens = trimmed.split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(tokens[0])) {
+            return null;
+        }
+        List<String> argv = new ArrayList<String>(tokens.length);
+        for (String token : tokens) {
+            if (!FILTER_PATTERN.matcher(token).matches()) {
+                return null;
+            }
+            argv.add(token);
+        }
+        return argv;
     }
 
 
