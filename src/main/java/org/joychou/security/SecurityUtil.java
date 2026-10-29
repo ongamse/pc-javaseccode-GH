@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -39,7 +40,35 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
+        if (url == null) {
+            return false;
+        }
+        String lower = url.toLowerCase(Locale.ROOT);
+        return lower.startsWith("http://") || lower.startsWith("https://");
+    }
+
+
+    private static final Pattern JDBC_HOST_URL = Pattern.compile(
+            "^jdbc:(postgresql|db2)://([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?)(:[0-9]{1,5})?/[A-Za-z0-9_]+$");
+
+    /**
+     * Validate a user supplied JDBC URL before connecting. Only <code>jdbc:&lt;scheme&gt;://host[:port]/db</code>
+     * of the expected scheme is accepted: no query string / property suffix (these allow driver gadgets such as
+     * socketFactory or loggerFile), and the host must be in the SSRF safe-host allowlist.
+     *
+     * @param jdbcUrl the decoded JDBC url
+     * @param scheme  expected scheme, e.g. "postgresql" or "db2"
+     * @return true if the url may be connected to
+     */
+    public static boolean checkJdbcUrl(String jdbcUrl, String scheme) {
+        if (jdbcUrl == null) {
+            return false;
+        }
+        java.util.regex.Matcher m = JDBC_HOST_URL.matcher(jdbcUrl);
+        if (!m.matches() || !m.group(1).equals(scheme)) {
+            return false;
+        }
+        return SSRFChecker.checkURLFckSSRF("http://" + m.group(2));
     }
 
 
@@ -52,7 +81,8 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
