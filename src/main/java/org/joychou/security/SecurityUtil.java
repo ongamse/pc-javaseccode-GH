@@ -11,14 +11,26 @@ import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
-    private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "date", "uptime", "hostname", "pwd", "uname", "ls"));
+    private static Logger logger =LoggerFactory.getLogger(SecurityUtil.class);
 
 
     /**
@@ -28,7 +40,35 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
+        if (url == null) {
+            return false;
+        }
+        String lower = url.toLowerCase(Locale.ROOT);
+        return lower.startsWith("http://") || lower.startsWith("https://");
+    }
+
+
+    private static final Pattern JDBC_HOST_URL = Pattern.compile(
+            "^jdbc:(postgresql|db2)://([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?)(:[0-9]{1,5})?/[A-Za-z0-9_]+$");
+
+    /**
+     * Validate a user supplied JDBC URL before connecting. Only <code>jdbc:&lt;scheme&gt;://host[:port]/db</code>
+     * of the expected scheme is accepted: no query string / property suffix (these allow driver gadgets such as
+     * socketFactory or loggerFile), and the host must be in the SSRF safe-host allowlist.
+     *
+     * @param jdbcUrl the decoded JDBC url
+     * @param scheme  expected scheme, e.g. "postgresql" or "db2"
+     * @return true if the url may be connected to
+     */
+    public static boolean checkJdbcUrl(String jdbcUrl, String scheme) {
+        if (jdbcUrl == null) {
+            return false;
+        }
+        java.util.regex.Matcher m = JDBC_HOST_URL.matcher(jdbcUrl);
+        if (!m.matches() || !m.group(1).equals(scheme)) {
+            return false;
+        }
+        return SSRFChecker.checkURLFckSSRF("http://" + m.group(2));
     }
 
 
@@ -41,7 +81,8 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
@@ -98,6 +139,86 @@ public class SecurityUtil {
             logger.error(e.toString());
             return null;
         }
+    }
+
+
+    /**
+     * Validate a CORS request Origin against the safe-domain allowlist using exact host matching
+     * (no suffix / contains matching). The Origin must be of the form
+     * <code>http(s)://host[:port]</code> without userinfo, path, query or fragment, and its host
+     * must equal an entry of the safe domains and not be blocked.
+     *
+     * @param origin the value of the request Origin header
+     * @return the normalized origin (scheme://host[:port]) if trusted; otherwise null
+     */
+    public static String checkCorsOrigin(String origin) {
+        if (origin == null || origin.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < origin.length(); i++) {
+            char ch = origin.charAt(i);
+            if (ch <= ' ' || ch == '\\' || Character.isISOControl(ch)) {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(origin);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (scheme == null || host == null) {
+                return null;
+            }
+            scheme = scheme.toLowerCase(Locale.ROOT);
+            if (!scheme.equals("http") && !scheme.equals("https")) {
+                return null;
+            }
+            if (uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+                return null;
+            }
+            String path = uri.getRawPath();
+            if (path != null && !path.isEmpty()) {
+                return null;
+            }
+            host = host.toLowerCase(Locale.ROOT);
+            if (WebConfig.getBlockDomains().contains(host)
+                    || !WebConfig.getSafeDomains().contains(host)) {
+                return null;
+            }
+            return scheme + "://" + host + (uri.getPort() == -1 ? "" : ":" + uri.getPort());
+        } catch (URISyntaxException e) {
+            return null;
+        }
+    }
+
+
+    /**
+     * Validate an untrusted URL before it is used as an HTTP redirect target.
+     * The url must be an absolute http(s) URL that parses strictly (RFC 3986, so backslash,
+     * whitespace and control characters are rejected), has an explicit host and no userinfo,
+     * and whose host passes the safe-domain allowlist of {@link #checkURL(String)}.
+     *
+     * @param url the redirect target
+     * @return the original url if it is a trusted redirect target; otherwise null
+     */
+    public static String checkRedirectURL(String url) {
+        if (url == null || url.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char ch = url.charAt(i);
+            if (ch <= ' ' || ch == '\\' || Character.isISOControl(ch)) {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(url);
+            if (uri.getHost() == null || uri.getRawUserInfo() != null || url.indexOf('@') >= 0) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return checkURL(url);
     }
 
 
@@ -199,12 +320,80 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Resolve a user supplied relative path against a base directory and make sure
+     * the result stays inside that directory. Rejects absolute paths, ".." escapes,
+     * NUL bytes and symlinks that point outside the base directory.
+     *
+     * @param baseDir base directory
+     * @param relPath user supplied path relative to baseDir
+     * @return the normalized path inside baseDir; null if the path is illegal
+     */
+    public static Path resolveInBaseDir(String baseDir, String relPath) {
+        if (baseDir == null || relPath == null || relPath.isEmpty() || relPath.indexOf('\0') >= 0) {
+            return null;
+        }
+        try {
+            Path base = Paths.get(baseDir).toRealPath();
+            Path candidate = base.resolve(relPath).normalize();
+            if (!candidate.startsWith(base)) {
+                return null;
+            }
+            if (Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
+                if (!candidate.toRealPath().startsWith(base)) {
+                    return null;
+                }
+            } else {
+                Path parent = candidate.getParent();
+                if (parent != null && Files.exists(parent) && !parent.toRealPath().startsWith(base)) {
+                    return null;
+                }
+            }
+            return candidate;
+        } catch (IOException | InvalidPathException e) {
+            logger.info("Illegal file path: " + e.toString());
+            return null;
+        }
+    }
+
+
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Parse a user supplied command line into an argv list without involving a shell.
+     * Only commands in a fixed read-only allowlist are accepted, and every argument must
+     * match the strict <code>a-zA-Z0-9_/.-</code> pattern.
+     *
+     * @param cmdLine the user supplied command line, e.g. "ls -la /tmp"
+     * @return argv list safe for ProcessBuilder (no shell), or null if not allowed
+     */
+    public static List<String> parseAllowedCommand(String cmdLine) {
+        if (null == cmdLine) {
+            return null;
+        }
+        String trimmed = cmdLine.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        String[] tokens = trimmed.split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(tokens[0])) {
+            return null;
+        }
+        List<String> argv = new ArrayList<String>(tokens.length);
+        for (String token : tokens) {
+            if (!FILTER_PATTERN.matcher(token).matches()) {
+                return null;
+            }
+            argv.add(token);
+        }
+        return argv;
     }
 
 

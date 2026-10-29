@@ -1,10 +1,12 @@
 package org.joychou.security.ssrf;
 
 import java.net.HttpURLConnection;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.regex.Pattern;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.net.util.SubnetUtils;
@@ -18,6 +20,13 @@ public class SSRFChecker {
 
     private static final Logger logger = LoggerFactory.getLogger(SSRFChecker.class);
     private static String decimalIp;
+
+    private static final Pattern IP_LITERAL = Pattern.compile(
+            "^(\\d{1,3}(\\.\\d{1,3}){3}|[0-9a-fA-F:.]*:[0-9a-fA-F:.]*(%[0-9a-zA-Z_.]+)?)$");
+    // Hosts made only of digits/dots or 0x-hex parts: the JDK/OS may read them as decimal, octal or hex IPs.
+    private static final Pattern NUMERIC_HOST = Pattern.compile("^(0[xX][0-9a-fA-F]*|\\d+)(\\.(0[xX][0-9a-fA-F]*|\\d+))*$");
+    private static final Pattern CANONICAL_IPV4 = Pattern.compile(
+            "^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$");
 
     public static boolean checkURLFckSSRF(String url) {
         if (null == url) {
@@ -69,6 +78,12 @@ public class SSRFChecker {
                 if (isInternalIpByUrl(finalUrl)) {
                     logger.error("[-] SSRF check failed. Dangerous url: " + finalUrl);
                     return false;  // 内网ip直接return，非内网ip继续判断是否有重定向
+                }
+
+                // Only request http(s) URLs whose every resolved address is public.
+                if (!isSafeOutboundUrl(finalUrl)) {
+                    logger.error("[-] SSRF check failed. Unsafe url: " + finalUrl);
+                    return false;
                 }
 
                 connection = (HttpURLConnection) new URL(finalUrl).openConnection();
@@ -132,17 +147,113 @@ public class SSRFChecker {
             return true;
         }
 
-        ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
-        for (String subnet : blackSubnets) {
-            SubnetUtils utils = new SubnetUtils(subnet);
-            if (utils.getInfo().isInRange(strIP)) {
+        // strIP is always an IP literal here; never feed a hostname to InetAddress (would trigger DNS).
+        if (!IP_LITERAL.matcher(strIP).matches()) {
+            logger.error("[-] SSRF check failed. Not an IP literal: " + strIP);
+            return true;
+        }
+        try {
+            if (isBlockedAddress(InetAddress.getByName(strIP))) {
                 logger.error("[-] SSRF check failed. Internal IP: " + strIP);
                 return true;
             }
+        } catch (Exception e) {
+            return true;
         }
 
         return false;
 
+    }
+
+
+    /**
+     * Check whether an address must never be reached by a server-side request: loopback, any-local,
+     * link-local (incl. cloud metadata 169.254.169.254), private (RFC1918), IPv6 unique-local,
+     * shared/reserved/multicast ranges and the subnets configured in ssrf_safe_domain.xml.
+     * IPv4-mapped IPv6 addresses are normalised by the JDK to IPv4 before this check.
+     *
+     * @return true if the address is blocked
+     */
+    public static boolean isBlockedAddress(InetAddress addr) {
+        if (addr == null) {
+            return true;
+        }
+        if (addr.isLoopbackAddress() || addr.isAnyLocalAddress() || addr.isLinkLocalAddress()
+                || addr.isSiteLocalAddress() || addr.isMulticastAddress()) {
+            return true;
+        }
+        byte[] b = addr.getAddress();
+        if (addr instanceof Inet6Address) {
+            // fc00::/7 unique local; deprecated IPv4-compatible ::a.b.c.d
+            if ((b[0] & 0xfe) == 0xfc || ((Inet6Address) addr).isIPv4CompatibleAddress()) {
+                return true;
+            }
+            return false;
+        }
+        int b0 = b[0] & 0xff;
+        int b1 = b[1] & 0xff;
+        int b2 = b[2] & 0xff;
+        if (b0 == 0                                  // 0.0.0.0/8
+                || (b0 == 100 && (b1 & 0xc0) == 64)  // 100.64.0.0/10 shared address space
+                || (b0 == 192 && b1 == 0 && b2 == 0) // 192.0.0.0/24
+                || (b0 == 198 && (b1 & 0xfe) == 18)  // 198.18.0.0/15 benchmarking
+                || b0 >= 240) {                      // 240.0.0.0/4 reserved + broadcast
+            return true;
+        }
+        ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
+        if (blackSubnets != null) {
+            String ip = addr.getHostAddress();
+            for (String subnet : blackSubnets) {
+                SubnetUtils utils = new SubnetUtils(subnet);
+                utils.setInclusiveHostCount(true);
+                if (utils.getInfo().isInRange(ip)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+
+    /**
+     * Validate a URL before the server requests it: scheme must be http/https, the host must be a
+     * well-formed name or canonical IP, and EVERY address the host resolves to must be public.
+     * Decimal / octal / hex IP encodings are rejected as ambiguous. Callers must also disable
+     * (or re-validate) redirects.
+     *
+     * @return true if the URL is safe to request
+     */
+    public static boolean isSafeOutboundUrl(String url) {
+        if (url == null) {
+            return false;
+        }
+        try {
+            URI u = new URI(url);
+            String scheme = u.getScheme();
+            if (scheme == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+                return false;
+            }
+            String host = u.getHost();
+            if (StringUtils.isEmpty(host)) {
+                return false;
+            }
+            if (host.startsWith("[") && host.endsWith("]")) {
+                host = host.substring(1, host.length() - 1);
+            }
+            if (NUMERIC_HOST.matcher(host).matches() && !CANONICAL_IPV4.matcher(host).matches()) {
+                logger.error("[-] SSRF check failed. Ambiguous numeric host: " + host);
+                return false;
+            }
+            for (InetAddress addr : InetAddress.getAllByName(host)) {
+                if (isBlockedAddress(addr)) {
+                    logger.error("[-] SSRF check failed. Internal address for host: " + host);
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
 

@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 import cn.hutool.http.HttpUtil;
 import org.joychou.security.SecurityUtil;
+import org.joychou.security.ssrf.SSRFChecker;
 import org.joychou.security.ssrf.SSRFException;
 import org.joychou.service.HttpService;
 import org.joychou.util.HttpUtils;
@@ -98,9 +99,9 @@ public class SSRF {
     public String request(@RequestParam String url) {
         try {
             SecurityUtil.startSSRFHook();
-            return HttpUtils.request(url);
+            return WebUtils.escapeHtml(HttpUtils.request(url));
         } catch (SSRFException | IOException e) {
-            return e.getMessage();
+            return WebUtils.escapeHtml(e.getMessage());
         } finally {
             SecurityUtil.stopSSRFHook();
         }
@@ -122,12 +123,18 @@ public class SSRF {
         try {
             String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
             // download
-            response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
+            response.setHeader("content-disposition", "attachment;fileName=" + WebUtils.sanitizeHeaderValue(downLoadImgFileName));
 
-            URL u = new URL(url);
+            // Only http(s) URLs resolving to public addresses; redirects are not followed.
+            if (!SSRFChecker.isSafeOutboundUrl(url)) {
+                logger.error("[-] SSRF check failed. Illegal url.");
+                return;
+            }
+            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setInstanceFollowRedirects(false);
             int length;
             byte[] bytes = new byte[1024];
-            inputStream = u.openStream(); // send request
+            inputStream = conn.getInputStream(); // send request
             outputStream = response.getOutputStream();
             while ((length = inputStream.read(bytes)) > 0) {
                 outputStream.write(bytes, 0, length);

@@ -1,7 +1,9 @@
 package org.joychou.controller;
 
 
+import org.joychou.util.WebUtils;
 import org.joychou.security.SecurityUtil;
+import org.joychou.security.ssrf.SSRFChecker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -111,7 +113,15 @@ public class URLWhiteList {
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                // Never redirect to a URL whose real (RFC 3986) host differs from the checked host,
+                // or that points at an internal address.
+                String safeUrl = SecurityUtil.checkRedirectURL(url);
+                if (safeUrl == null || !host.equalsIgnoreCase(SecurityUtil.gethost(safeUrl))
+                        || !SSRFChecker.isSafeOutboundUrl(safeUrl)) {
+                    return;
+                }
+                res.sendRedirect(safeUrl);
+                return;
             }
         }
 
@@ -135,9 +145,9 @@ public class URLWhiteList {
 
         for (String whiteHost: whiteDomainlists){
             if (whiteHost.startsWith(".") && host.endsWith(whiteHost)) {
-                return url;
+                return WebUtils.escapeHtml(url);
             } else if (!whiteHost.startsWith(".") && host.equals(whiteHost)) {
-                return url;
+                return WebUtils.escapeHtml(url);
             }
         }
 

@@ -80,7 +80,13 @@ joychou/joychou123
 ``` 
 spring.datasource.url=jdbc:mysql://127.0.0.1:3306/java_sec_code
 spring.datasource.username=root
-spring.datasource.password=woshishujukumima
+spring.datasource.password=${DB_PASSWORD}
+```
+
+启动应用前请先设置数据库密码环境变量（密码不再提交到 `application.properties`）：
+
+```
+export DB_PASSWORD=<your mysql password>
 ```
 
 - Docker

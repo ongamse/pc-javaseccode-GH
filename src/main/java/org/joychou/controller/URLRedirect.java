@@ -12,6 +12,7 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 
 import org.joychou.security.SecurityUtil;
+import org.joychou.util.WebUtils;
 
 /**
  * The vulnerability code and security code of Java url redirect.
@@ -29,8 +30,13 @@ public class URLRedirect {
      * http://localhost:8080/urlRedirect/redirect?url=http://www.baidu.com
      */
     @GetMapping("/redirect")
-    public String redirect(@RequestParam("url") String url) {
-        return "redirect:" + url;
+    public void redirect(@RequestParam("url") String url, HttpServletResponse response) throws IOException {
+        String safeUrl = SecurityUtil.checkRedirectURL(url);
+        if (safeUrl == null) {
+            response.sendError(HttpServletResponse.SC_FORBIDDEN, "url forbidden");
+            return;
+        }
+        response.sendRedirect(safeUrl); // 302 redirect
     }
 
 
@@ -40,9 +46,13 @@ public class URLRedirect {
     @RequestMapping("/setHeader")
     @ResponseBody
     public static void setHeader(HttpServletRequest request, HttpServletResponse response) {
-        String url = request.getParameter("url");
+        String url = SecurityUtil.checkRedirectURL(request.getParameter("url"));
+        if (url == null) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
         response.setStatus(HttpServletResponse.SC_MOVED_PERMANENTLY); // 301 redirect
-        response.setHeader("Location", url);
+        response.setHeader("Location", WebUtils.sanitizeHeaderValue(url));
     }
 
 
@@ -52,7 +62,11 @@ public class URLRedirect {
     @RequestMapping("/sendRedirect")
     @ResponseBody
     public static void sendRedirect(HttpServletRequest request, HttpServletResponse response) throws IOException {
-        String url = request.getParameter("url");
+        String url = SecurityUtil.checkRedirectURL(request.getParameter("url"));
+        if (url == null) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
         response.sendRedirect(url); // 302 redirect
     }
 
@@ -83,11 +97,12 @@ public class URLRedirect {
     public void sendRedirect_seccode(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         String url = request.getParameter("url");
-        if (SecurityUtil.checkURL(url) == null) {
+        String safeUrl = SecurityUtil.checkRedirectURL(url);
+        if (safeUrl == null) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.getWriter().write("url forbidden");
             return;
         }
-        response.sendRedirect(url);
+        response.sendRedirect(safeUrl);
     }
 }

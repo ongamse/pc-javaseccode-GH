@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 
 import org.apache.velocity.VelocityContext;
+import org.joychou.util.WebUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -14,14 +15,14 @@ import java.io.StringWriter;
 @RequestMapping("/ssti")
 public class SSTI {
 
+    private static final String FIXED_TEMPLATE =
+            "Author: $author, Address: $address, Phone: $phone, Input: $input";
+
     /**
-     * SSTI of Java velocity. The latest Velocity version still has this problem.
-     * Fix method: Avoid to use Velocity.evaluate method.
-     * <p>
-     * http://localhost:8080/ssti/velocity?template=%23set($e=%22e%22);$e.getClass().forName(%22java.lang.Runtime%22).getMethod(%22getRuntime%22,null).invoke(null,null).exec(%22open%20-a%20Calculator%22)
-     * Open a calculator in MacOS.
+     * Velocity rendering with a fixed template. User input is never used as
+     * template source; it is only passed (HTML-escaped) as context data.
      *
-     * @param template exp
+     * @param template untrusted text, treated as data only
      */
     @GetMapping("/velocity")
     public void velocity(String template) {
@@ -32,8 +33,9 @@ public class SSTI {
         context.put("author", "Elliot A.");
         context.put("address", "217 E Broadway");
         context.put("phone", "555-1337");
+        context.put("input", WebUtils.escapeHtml(template));
 
         StringWriter swOut = new StringWriter();
-        Velocity.evaluate(context, swOut, "test", template);
+        Velocity.evaluate(context, swOut, "test", FIXED_TEMPLATE);
     }
 }

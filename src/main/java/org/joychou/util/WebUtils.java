@@ -3,6 +3,7 @@ package org.joychou.util;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import java.io.*;
+import java.util.regex.Pattern;
 
 import com.google.common.base.Preconditions;
 import org.springframework.web.util.HtmlUtils;
@@ -27,8 +28,48 @@ public class WebUtils {
     }
 
 
+    // Strict JSONP callback: JavaScript identifier(s) separated by dots, no other characters.
+    private static final Pattern JSONP_CALLBACK = Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*){0,4}$");
+
+    /**
+     * Check a JSONP callback name against a strict identifier allowlist.
+     */
+    public static boolean isValidJsonpCallback(String callback) {
+        return callback != null && callback.length() <= 64 && JSONP_CALLBACK.matcher(callback).matches();
+    }
+
+    /**
+     * HTML-escape untrusted text before it is written into a response body.
+     * Null-safe: null stays null.
+     */
+    public static String escapeHtml(String input) {
+        return input == null ? null : HtmlUtils.htmlEscape(input);
+    }
+
+    /**
+     * Remove CR, LF and all other ISO control characters from an untrusted value before it is
+     * written into an HTTP response header (prevents header injection / response splitting).
+     * Null-safe: null stays null.
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
     public static String json2Jsonp(String callback, String jsonStr) {
-        return HtmlUtils.htmlEscape(callback) + "(" + jsonStr + ")";
+        if (!isValidJsonpCallback(callback)) {
+            return "error";
+        }
+        return callback + "(" + jsonStr + ")";
     }
 
 

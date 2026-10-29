@@ -9,9 +9,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
 import java.io.IOException;
+import java.util.regex.Pattern;
 
 @RestController
 public class CommandInject {
+
+    private static final Pattern HOST_PATTERN = Pattern.compile("^[a-zA-Z0-9.-]+(:[0-9]{1,5})?$");
 
     protected final Logger logger = LoggerFactory.getLogger(this.getClass());
 
@@ -24,11 +27,16 @@ public class CommandInject {
     @GetMapping("/codeinject")
     public String codeInject(String filepath) throws IOException {
 
-        String[] cmdList = new String[]{"sh", "-c", "ls -la " + filepath};
+        String safePath = SecurityUtil.cmdFilter(filepath);
+        if (null == safePath) {
+            return "Bad boy. I got u.";
+        }
+        // No shell: the path is a single argv element and cannot be interpreted as an option.
+        String[] cmdList = new String[]{"ls", "-la", "--", safePath};
         ProcessBuilder builder = new ProcessBuilder(cmdList);
         builder.redirectErrorStream(true);
         Process process = builder.start();
-        return WebUtils.convertStreamToString(process.getInputStream());
+        return WebUtils.escapeHtml(WebUtils.convertStreamToString(process.getInputStream()));
     }
 
     /**
@@ -41,11 +49,16 @@ public class CommandInject {
 
         String host = request.getHeader("host");
         logger.info(host);
-        String[] cmdList = new String[]{"sh", "-c", "curl " + host};
+        if (null == host || !HOST_PATTERN.matcher(host).matches()
+                || !SecurityUtil.checkSSRFByWhitehosts("http://" + host)) {
+            return "Bad boy. I got u.";
+        }
+        // No shell: the validated host is a single argv element (always prefixed by the scheme).
+        String[] cmdList = new String[]{"curl", "http://" + host};
         ProcessBuilder builder = new ProcessBuilder(cmdList);
         builder.redirectErrorStream(true);
         Process process = builder.start();
-        return WebUtils.convertStreamToString(process.getInputStream());
+        return WebUtils.escapeHtml(WebUtils.convertStreamToString(process.getInputStream()));
     }
 
     @GetMapping("/codeinject/sec")
@@ -54,10 +67,10 @@ public class CommandInject {
         if (null == filterFilePath) {
             return "Bad boy. I got u.";
         }
-        String[] cmdList = new String[]{"sh", "-c", "ls -la " + filterFilePath};
+        String[] cmdList = new String[]{"ls", "-la", "--", filterFilePath};
         ProcessBuilder builder = new ProcessBuilder(cmdList);
         builder.redirectErrorStream(true);
         Process process = builder.start();
-        return WebUtils.convertStreamToString(process.getInputStream());
+        return WebUtils.escapeHtml(WebUtils.convertStreamToString(process.getInputStream()));
     }
 }
