@@ -143,6 +143,55 @@ public class SecurityUtil {
 
 
     /**
+     * Validate a CORS request Origin against the safe-domain allowlist using exact host matching
+     * (no suffix / contains matching). The Origin must be of the form
+     * <code>http(s)://host[:port]</code> without userinfo, path, query or fragment, and its host
+     * must equal an entry of the safe domains and not be blocked.
+     *
+     * @param origin the value of the request Origin header
+     * @return the normalized origin (scheme://host[:port]) if trusted; otherwise null
+     */
+    public static String checkCorsOrigin(String origin) {
+        if (origin == null || origin.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < origin.length(); i++) {
+            char ch = origin.charAt(i);
+            if (ch <= ' ' || ch == '\\' || Character.isISOControl(ch)) {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(origin);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (scheme == null || host == null) {
+                return null;
+            }
+            scheme = scheme.toLowerCase(Locale.ROOT);
+            if (!scheme.equals("http") && !scheme.equals("https")) {
+                return null;
+            }
+            if (uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+                return null;
+            }
+            String path = uri.getRawPath();
+            if (path != null && !path.isEmpty()) {
+                return null;
+            }
+            host = host.toLowerCase(Locale.ROOT);
+            if (WebConfig.getBlockDomains().contains(host)
+                    || !WebConfig.getSafeDomains().contains(host)) {
+                return null;
+            }
+            return scheme + "://" + host + (uri.getPort() == -1 ? "" : ":" + uri.getPort());
+        } catch (URISyntaxException e) {
+            return null;
+        }
+    }
+
+
+    /**
      * Validate an untrusted URL before it is used as an HTTP redirect target.
      * The url must be an absolute http(s) URL that parses strictly (RFC 3986, so backslash,
      * whitespace and control characters are rejected), has an explicit host and no userinfo,
