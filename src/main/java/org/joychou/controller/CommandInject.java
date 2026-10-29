@@ -36,7 +36,7 @@ public class CommandInject {
         ProcessBuilder builder = new ProcessBuilder(cmdList);
         builder.redirectErrorStream(true);
         Process process = builder.start();
-        return WebUtils.convertStreamToString(process.getInputStream());
+        return WebUtils.escapeHtml(WebUtils.convertStreamToString(process.getInputStream()));
     }
 
     /**
@@ -58,7 +58,7 @@ public class CommandInject {
         ProcessBuilder builder = new ProcessBuilder(cmdList);
         builder.redirectErrorStream(true);
         Process process = builder.start();
-        return WebUtils.convertStreamToString(process.getInputStream());
+        return WebUtils.escapeHtml(WebUtils.convertStreamToString(process.getInputStream()));
     }
 
     @GetMapping("/codeinject/sec")
@@ -71,6 +71,6 @@ public class CommandInject {
         ProcessBuilder builder = new ProcessBuilder(cmdList);
         builder.redirectErrorStream(true);
         Process process = builder.start();
-        return WebUtils.convertStreamToString(process.getInputStream());
+        return WebUtils.escapeHtml(WebUtils.convertStreamToString(process.getInputStream()));
     }
 }
