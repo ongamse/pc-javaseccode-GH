@@ -11,11 +11,9 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.UUID;
 
 import org.joychou.security.SecurityUtil;
@@ -58,12 +56,17 @@ public class FileUpload {
 
         try {
             // Get the file and save it somewhere
+            String safeName = sanitizeFileName(file.getOriginalFilename());
+            Path path = safeName == null ? null : SecurityUtil.resolveInBaseDir(UPLOADED_FOLDER, safeName);
+            if (path == null) {
+                redirectAttributes.addFlashAttribute("message", "Illegal file name");
+                return "redirect:/file/status";
+            }
             byte[] bytes = file.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + file.getOriginalFilename());
             Files.write(path, bytes);
 
             redirectAttributes.addFlashAttribute("message",
-                    "You successfully uploaded '" + UPLOADED_FOLDER + file.getOriginalFilename() + "'");
+                    "You successfully uploaded '" + UPLOADED_FOLDER + safeName + "'");
 
         } catch (IOException e) {
             redirectAttributes.addFlashAttribute("message", "upload failed");
@@ -86,11 +89,23 @@ public class FileUpload {
             return "Please select a file to upload";
         }
 
-        String fileName = multifile.getOriginalFilename();
+        String fileName = sanitizeFileName(multifile.getOriginalFilename());
+        if (fileName == null || fileName.lastIndexOf('.') < 0) {
+            logger.error("[-] Illegal file name");
+            return "Upload failed. Illeagl picture.";
+        }
+        Path targetPath = SecurityUtil.resolveInBaseDir(UPLOADED_FOLDER, fileName);
+        if (targetPath == null) {
+            logger.error("[-] Illegal file path");
+            return "Upload failed. Illeagl picture.";
+        }
         String Suffix = fileName.substring(fileName.lastIndexOf(".")); // 获取文件后缀名
         String mimeType = multifile.getContentType(); // 获取MIME类型
-        String filePath = UPLOADED_FOLDER + fileName;
-        File excelFile = convert(multifile);
+        String filePath = targetPath.toString();
+        File excelFile = convert(multifile, fileName);
+        if (excelFile == null) {
+            return "Upload failed";
+        }
 
 
         // 判断文件后缀名是否在白名单内  校验1
@@ -141,8 +156,7 @@ public class FileUpload {
         try {
             // Get the file and save it somewhere
             byte[] bytes = multifile.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + multifile.getOriginalFilename());
-            Files.write(path, bytes);
+            Files.write(targetPath, bytes);
         } catch (IOException e) {
             logger.error(e.toString());
             deleteFile(filePath);
@@ -155,7 +169,12 @@ public class FileUpload {
     }
 
     private void deleteFile(String filePath) {
-        File delFile = new File(filePath);
+        Path delPath = SecurityUtil.resolveInBaseDir(UPLOADED_FOLDER, filePath);
+        if (delPath == null) {
+            logger.info("Refusing to delete path outside upload folder");
+            return;
+        }
+        File delFile = delPath.toFile();
         if(delFile.isFile() && delFile.exists()) {
             if (delFile.delete()) {
                 logger.info("[+] " + filePath + " delete successfully!");
@@ -171,21 +190,40 @@ public class FileUpload {
      * 不建议使用transferTo，因为原始的MultipartFile会被覆盖
      * https://stackoverflow.com/questions/24339990/how-to-convert-a-multipart-file-to-file
      */
-    private File convert(MultipartFile multiFile) throws Exception {
-        String fileName = multiFile.getOriginalFilename();
+    private File convert(MultipartFile multiFile, String fileName) throws Exception {
         String suffix = fileName.substring(fileName.lastIndexOf("."));
         UUID uuid = Generators.timeBasedGenerator().generate();
-        randomFilePath = UPLOADED_FOLDER + uuid + suffix;
         // 随机生成一个同后缀名的文件
-        File convFile = new File(randomFilePath);
+        Path convPath = SecurityUtil.resolveInBaseDir(UPLOADED_FOLDER, uuid + suffix);
+        if (convPath == null) {
+            return null;
+        }
+        randomFilePath = convPath.toString();
+        File convFile = convPath.toFile();
         boolean ret = convFile.createNewFile();
         if (!ret) {
             return null;
         }
-        FileOutputStream fos = new FileOutputStream(convFile);
-        fos.write(multiFile.getBytes());
-        fos.close();
+        Files.write(convPath, multiFile.getBytes());
         return convFile;
+    }
+
+    /**
+     * Reduce a client supplied file name to a bare file name: drop any directory
+     * components (both separators) and reject empty, dot-only or NUL-containing names.
+     *
+     * @return the bare file name, or null if the name is illegal
+     */
+    private static String sanitizeFileName(String originalName) {
+        if (originalName == null || originalName.indexOf('\0') >= 0) {
+            return null;
+        }
+        String name = originalName.substring(
+                Math.max(originalName.lastIndexOf('/'), originalName.lastIndexOf('\\')) + 1);
+        if (name.isEmpty() || name.equals(".") || name.equals("..")) {
+            return null;
+        }
+        return name;
     }
 
     /**

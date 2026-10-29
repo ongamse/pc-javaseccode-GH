@@ -11,6 +11,11 @@ import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.regex.Pattern;
 
@@ -196,6 +201,43 @@ public class SecurityUtil {
         }
 
         return filepath;
+    }
+
+
+    /**
+     * Resolve a user supplied relative path against a base directory and make sure
+     * the result stays inside that directory. Rejects absolute paths, ".." escapes,
+     * NUL bytes and symlinks that point outside the base directory.
+     *
+     * @param baseDir base directory
+     * @param relPath user supplied path relative to baseDir
+     * @return the normalized path inside baseDir; null if the path is illegal
+     */
+    public static Path resolveInBaseDir(String baseDir, String relPath) {
+        if (baseDir == null || relPath == null || relPath.isEmpty() || relPath.indexOf('\0') >= 0) {
+            return null;
+        }
+        try {
+            Path base = Paths.get(baseDir).toRealPath();
+            Path candidate = base.resolve(relPath).normalize();
+            if (!candidate.startsWith(base)) {
+                return null;
+            }
+            if (Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
+                if (!candidate.toRealPath().startsWith(base)) {
+                    return null;
+                }
+            } else {
+                Path parent = candidate.getParent();
+                if (parent != null && Files.exists(parent) && !parent.toRealPath().startsWith(base)) {
+                    return null;
+                }
+            }
+            return candidate;
+        } catch (IOException | InvalidPathException e) {
+            logger.info("Illegal file path: " + e.toString());
+            return null;
+        }
     }
 
 
