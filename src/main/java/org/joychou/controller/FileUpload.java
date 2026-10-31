@@ -59,11 +59,11 @@ public class FileUpload {
         try {
             // Get the file and save it somewhere
             byte[] bytes = file.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + file.getOriginalFilename());
+            Path path = resolveUploadPath(file.getOriginalFilename());
             Files.write(path, bytes);
 
             redirectAttributes.addFlashAttribute("message",
-                    "You successfully uploaded '" + UPLOADED_FOLDER + file.getOriginalFilename() + "'");
+                    "You successfully uploaded '" + path + "'");
 
         } catch (IOException e) {
             redirectAttributes.addFlashAttribute("message", "upload failed");
@@ -89,7 +89,7 @@ public class FileUpload {
         String fileName = multifile.getOriginalFilename();
         String Suffix = fileName.substring(fileName.lastIndexOf(".")); // 获取文件后缀名
         String mimeType = multifile.getContentType(); // 获取MIME类型
-        String filePath = UPLOADED_FOLDER + fileName;
+        String filePath = resolveUploadPath(fileName).toString();
         File excelFile = convert(multifile);
 
 
@@ -141,7 +141,7 @@ public class FileUpload {
         try {
             // Get the file and save it somewhere
             byte[] bytes = multifile.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + multifile.getOriginalFilename());
+            Path path = resolveUploadPath(multifile.getOriginalFilename());
             Files.write(path, bytes);
         } catch (IOException e) {
             logger.error(e.toString());
@@ -154,8 +154,35 @@ public class FileUpload {
         return String.format("You successfully uploaded '%s'", filePath);
     }
 
+    /**
+     * Resolve an untrusted file name inside UPLOADED_FOLDER. Directory components are
+     * dropped and the result must stay inside the upload folder.
+     */
+    private static Path resolveUploadPath(String originalName) throws IOException {
+        if (originalName == null) {
+            throw new IOException("Invalid file name");
+        }
+        String name = originalName.substring(
+                Math.max(originalName.lastIndexOf('/'), originalName.lastIndexOf('\\')) + 1);
+        if (name.isEmpty() || name.equals(".") || name.equals("..") || name.indexOf('\0') >= 0) {
+            throw new IOException("Invalid file name");
+        }
+        Path base = Paths.get(UPLOADED_FOLDER).toAbsolutePath().normalize();
+        Path resolved = base.resolve(name).normalize();
+        if (!resolved.startsWith(base)) {
+            throw new IOException("Invalid file path");
+        }
+        return resolved;
+    }
+
     private void deleteFile(String filePath) {
-        File delFile = new File(filePath);
+        Path base = Paths.get(UPLOADED_FOLDER).toAbsolutePath().normalize();
+        Path target = Paths.get(filePath).toAbsolutePath().normalize();
+        if (!target.startsWith(base)) {
+            logger.info("Refusing to delete file outside upload folder");
+            return;
+        }
+        File delFile = target.toFile();
         if(delFile.isFile() && delFile.exists()) {
             if (delFile.delete()) {
                 logger.info("[+] " + filePath + " delete successfully!");
@@ -174,10 +201,15 @@ public class FileUpload {
     private File convert(MultipartFile multiFile) throws Exception {
         String fileName = multiFile.getOriginalFilename();
         String suffix = fileName.substring(fileName.lastIndexOf("."));
+        // Only a plain alphanumeric extension is kept; anything else (e.g. path separators) is replaced
+        if (!suffix.matches("\\.[A-Za-z0-9]{1,10}")) {
+            suffix = ".tmp";
+        }
         UUID uuid = Generators.timeBasedGenerator().generate();
-        randomFilePath = UPLOADED_FOLDER + uuid + suffix;
+        Path randomPath = resolveUploadPath(uuid + suffix);
+        randomFilePath = randomPath.toString();
         // 随机生成一个同后缀名的文件
-        File convFile = new File(randomFilePath);
+        File convFile = randomPath.toFile();
         boolean ret = convFile.createNewFile();
         if (!ret) {
             return null;
