@@ -45,6 +45,9 @@ public class Jsonp {
     @RequestMapping(value = "/vuln/referer", produces = "application/javascript")
     public String referer(HttpServletRequest request) {
         String callback = request.getParameter(this.callback);
+        if (!isSafeCallback(callback)) {
+            return "error";
+        }
         return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
@@ -62,6 +65,9 @@ public class Jsonp {
             return "error";
         }
         String callback = request.getParameter(this.callback);
+        if (!isSafeCallback(callback)) {
+            return "error";
+        }
         return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
@@ -107,6 +113,9 @@ public class Jsonp {
             return "error";
         }
         String callback = request.getParameter(this.callback);
+        if (!isSafeCallback(callback)) {
+            return "error";
+        }
         return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
@@ -131,12 +140,22 @@ public class Jsonp {
 
         String callback = request.getParameter("fastjsonpCallback");
         if (StringUtils.isNotBlank(callback)) {
+            if (!isSafeCallback(callback)) {
+                return "error";
+            }
             JSONPObject jsonpObj = new JSONPObject(callback);
             jsonpObj.addParameter(csrfToken);
             return jsonpObj.toString();
         } else {
             return csrfToken.toString();
         }
+    }
+
+    /**
+     * Only allow a plain JavaScript identifier (optionally dotted) as the JSONP callback name.
+     */
+    private static boolean isSafeCallback(String callback) {
+        return callback != null && callback.matches("^[A-Za-z_$][A-Za-z0-9_$.]{0,63}$");
     }
 
 }
