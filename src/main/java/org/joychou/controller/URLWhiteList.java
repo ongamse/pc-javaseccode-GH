@@ -111,7 +111,14 @@ public class URLWhiteList {
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                // Additionally enforce the project-wide allowlist/blocklist before redirecting.
+                String safeUrl = SecurityUtil.checkURL(url);
+                if (safeUrl == null) {
+                    res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    return;
+                }
+                res.sendRedirect(safeUrl);
+                return;
             }
         }
 
