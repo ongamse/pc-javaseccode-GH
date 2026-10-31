@@ -15,6 +15,14 @@ public class Server implements Hello {
     public static void main(String args[]) {
 
         try {
+            // Restrict what the registry may deserialize (JEP 290 allowlist, reject everything else).
+            // Must be set before the registry class is initialised.
+            if (System.getProperty("sun.rmi.registry.registryFilter") == null) {
+                System.setProperty("sun.rmi.registry.registryFilter",
+                        "maxdepth=20;java.lang.String;java.lang.Number;java.lang.reflect.Proxy;java.rmi.Remote;"
+                                + "java.rmi.server.**;sun.rmi.server.UnicastRef;sun.rmi.transport.LiveRef;"
+                                + "sun.rmi.transport.tcp.TCPEndpoint;org.joychou.RMI.Hello;!*");
+            }
             Server obj = new Server();
             Hello stub = (Hello) UnicastRemoteObject.exportObject(obj, 0);
             LocateRegistry.createRegistry(1099);
