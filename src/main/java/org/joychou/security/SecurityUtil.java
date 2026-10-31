@@ -290,6 +290,28 @@ public class SecurityUtil {
 
 
     /**
+     * Remove CR, LF and other ISO control characters from a value that is going to be written into an
+     * HTTP response header / cookie value, to prevent CRLF (response splitting) injection.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null if the input is null
+     */
+    public static String headerFilter(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch) && ch != '\u2028' && ch != '\u2029') {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+
+    /**
      * 过滤mybatis中order by不能用#的情况。
      * 严格限制用户输入只能包含<code>a-zA-Z0-9_-.</code>字符。
      *
