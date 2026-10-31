@@ -16,6 +16,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
@@ -23,6 +24,8 @@ public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
     private static final Pattern HOST_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9\\.-]*(:[0-9]{1,5})?$");
+    private static final Pattern JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:(postgresql|db2)://([a-zA-Z0-9][a-zA-Z0-9\\.-]*)(?::([0-9]{1,5}))?/([a-zA-Z0-9_]+)$");
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
             Arrays.asList("whoami", "pwd", "date", "id", "uname", "hostname"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
@@ -46,12 +49,45 @@ public class SecurityUtil {
      * @return host
      */
     public static String gethost(String url) {
+        if (url == null || !isHttp(url)) {
+            return "";
+        }
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
+    }
+
+
+    /**
+     * Validate a user supplied jdbc url. Only <code>jdbc:&lt;type&gt;://host[:port]/database</code> is accepted:
+     * no query string / driver properties (e.g. socketFactory, autoDeserialize, JNDI names) and the host must
+     * resolve to public addresses only (no loopback, link-local, site-local or metadata addresses).
+     *
+     * @param jdbcUrl  the jdbc url to check
+     * @param dbType   expected jdbc sub protocol, e.g. postgresql or db2
+     * @return the jdbc url if it is safe, otherwise null
+     */
+    public static String checkJdbcUrl(String jdbcUrl, String dbType) {
+        if (jdbcUrl == null || dbType == null) {
+            return null;
+        }
+        Matcher m = JDBC_URL_PATTERN.matcher(jdbcUrl);
+        if (!m.matches() || !dbType.equals(m.group(1))) {
+            return null;
+        }
+        String port = m.group(3);
+        if (port != null && Integer.parseInt(port) > 65535) {
+            return null;
+        }
+        String hostUrl = "http://" + m.group(2) + (port == null ? "" : ":" + port);
+        if (!SSRFChecker.isSafeOutboundUrl(hostUrl)) {
+            return null;
+        }
+        return jdbcUrl;
     }
 
 
