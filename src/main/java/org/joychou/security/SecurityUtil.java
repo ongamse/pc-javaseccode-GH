@@ -12,12 +12,22 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern HOST_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9\\.-]*(:[0-9]{1,5})?$");
+    private static final Pattern JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:(postgresql|db2)://([a-zA-Z0-9][a-zA-Z0-9\\.-]*)(?::([0-9]{1,5}))?/([a-zA-Z0-9_]+)$");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "pwd", "date", "id", "uname", "hostname"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -39,12 +49,45 @@ public class SecurityUtil {
      * @return host
      */
     public static String gethost(String url) {
+        if (url == null || !isHttp(url)) {
+            return "";
+        }
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
+    }
+
+
+    /**
+     * Validate a user supplied jdbc url. Only <code>jdbc:&lt;type&gt;://host[:port]/database</code> is accepted:
+     * no query string / driver properties (e.g. socketFactory, autoDeserialize, JNDI names) and the host must
+     * resolve to public addresses only (no loopback, link-local, site-local or metadata addresses).
+     *
+     * @param jdbcUrl  the jdbc url to check
+     * @param dbType   expected jdbc sub protocol, e.g. postgresql or db2
+     * @return the jdbc url if it is safe, otherwise null
+     */
+    public static String checkJdbcUrl(String jdbcUrl, String dbType) {
+        if (jdbcUrl == null || dbType == null) {
+            return null;
+        }
+        Matcher m = JDBC_URL_PATTERN.matcher(jdbcUrl);
+        if (!m.matches() || !dbType.equals(m.group(1))) {
+            return null;
+        }
+        String port = m.group(3);
+        if (port != null && Integer.parseInt(port) > 65535) {
+            return null;
+        }
+        String hostUrl = "http://" + m.group(2) + (port == null ? "" : ":" + port);
+        if (!SSRFChecker.isSafeOutboundUrl(hostUrl)) {
+            return null;
+        }
+        return jdbcUrl;
     }
 
 
@@ -200,11 +243,71 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Validate a user supplied command line and split it into an argv list (no shell involved).
+     * The executable must be in the allowlist and every argument must match the safe pattern.
+     *
+     * @param cmd command line, e.g. "whoami"
+     * @return argv list for ProcessBuilder, or null if the command is not allowed
+     */
+    public static List<String> cmdArgv(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] tokens = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(tokens[0])) {
+            return null;
+        }
+        for (int i = 1; i < tokens.length; i++) {
+            if (cmdFilter(tokens[i]) == null) {
+                return null;
+            }
+        }
+        return new ArrayList<String>(Arrays.asList(tokens));
+    }
+
+
+    /**
+     * Validate a Host header value (host or host:port) so it can be safely passed as a single argv element.
+     *
+     * @param host host header value
+     * @return the host if valid, otherwise null
+     */
+    public static String hostFilter(String host) {
+        if (host == null || !HOST_PATTERN.matcher(host).matches()) {
+            return null;
+        }
+        return host;
+    }
+
+
+    /**
+     * Remove CR, LF and other ISO control characters from a value that is going to be written into an
+     * HTTP response header / cookie value, to prevent CRLF (response splitting) injection.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null if the input is null
+     */
+    public static String headerFilter(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch) && ch != '\u2028' && ch != '\u2029') {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
     }
 
 

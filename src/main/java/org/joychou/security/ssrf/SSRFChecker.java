@@ -1,6 +1,7 @@
 package org.joychou.security.ssrf;
 
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
@@ -66,7 +67,7 @@ public class SSRFChecker {
         try {
             do {
                 // 判断当前请求的URL是否是内网ip
-                if (isInternalIpByUrl(finalUrl)) {
+                if (!isSafeOutboundUrl(finalUrl)) {
                     logger.error("[-] SSRF check failed. Dangerous url: " + finalUrl);
                     return false;  // 内网ip直接return，非内网ip继续判断是否有重定向
                 }
@@ -93,7 +94,7 @@ public class SSRFChecker {
             } while (connection.getResponseCode() != HttpURLConnection.HTTP_OK);
             connection.disconnect();
         } catch (Exception e) {
-            return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
+            return false;  // Fail closed: if the check cannot be completed, the url is not considered safe.
         }
         return true; // 默认返回true
     }
@@ -132,17 +133,102 @@ public class SSRFChecker {
             return true;
         }
 
-        ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
-        for (String subnet : blackSubnets) {
-            SubnetUtils utils = new SubnetUtils(subnet);
-            if (utils.getInfo().isInRange(strIP)) {
-                logger.error("[-] SSRF check failed. Internal IP: " + strIP);
-                return true;
-            }
+        InetAddress address;
+        try {
+            // strIP is an ip literal here, so no dns request is sent.
+            address = InetAddress.getByName(strIP);
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Illegal IP: " + strIP);
+            return true;
+        }
+
+        if (isInternalAddress(address)) {
+            logger.error("[-] SSRF check failed. Internal IP: " + strIP);
+            return true;
         }
 
         return false;
 
+    }
+
+
+    /**
+     * Check whether an address is loopback, link-local (including cloud metadata 169.254.169.254),
+     * site-local, unique-local, multicast, wildcard, shared address space, or in the configured block subnets.
+     *
+     * @param address resolved address
+     * @return true if the address is internal or otherwise not allowed
+     */
+    private static boolean isInternalAddress(InetAddress address) {
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress() || address.isMulticastAddress()) {
+            return true;
+        }
+
+        byte[] raw = address.getAddress();
+        if (address instanceof Inet4Address) {
+            // 100.64.0.0/10 shared address space
+            if ((raw[0] & 0xFF) == 100 && (raw[1] & 0xC0) == 0x40) {
+                return true;
+            }
+            ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
+            for (String subnet : blackSubnets) {
+                SubnetUtils utils = new SubnetUtils(subnet);
+                utils.setInclusiveHostCount(true);
+                if (utils.getInfo().isInRange(address.getHostAddress())) {
+                    return true;
+                }
+            }
+        } else if ((raw[0] & 0xFE) == 0xFC) {
+            // fc00::/7 unique local addresses
+            return true;
+        }
+
+        return false;
+    }
+
+
+    /**
+     * Validate an outbound url before sending a request: scheme must be http or https, the host must be
+     * parsable, and every address the host resolves to must be a public address.
+     * Callers should additionally disable automatic redirects, otherwise a redirect may lead to an internal address.
+     *
+     * @param url the url to be requested
+     * @return true if the url is safe to request, otherwise false
+     */
+    public static boolean isSafeOutboundUrl(String url) {
+        if (null == url || !SecurityUtil.isHttp(url)) {
+            return false;
+        }
+
+        String host = url2host(url);
+        if (null == host || host.isEmpty()) {
+            return false;
+        }
+
+        // Octal / abbreviated ip notation is interpreted differently by different clients.
+        if (isOctalIP(host)) {
+            logger.error("[-] SSRF check failed. Octal ip: " + host);
+            return false;
+        }
+
+        try {
+            // send dns request
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            if (addresses.length == 0) {
+                return false;
+            }
+            for (InetAddress address : addresses) {
+                if (isInternalAddress(address)) {
+                    logger.error("[-] SSRF check failed. Internal IP: " + address.getHostAddress());
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("isSafeOutboundUrl exception " + e.getMessage());
+            return false;
+        }
     }
 
 
@@ -292,7 +378,8 @@ public class SSRFChecker {
             // use URI instead of URL
             URI u = new URI(url);
             if (SecurityUtil.isHttp(url)) {
-                return u.getHost();
+                String host = u.getHost();
+                return host == null ? "" : host;
             }
             return "";
         } catch (Exception e) {

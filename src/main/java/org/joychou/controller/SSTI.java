@@ -5,6 +5,7 @@ import org.apache.velocity.VelocityContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 
 import org.apache.velocity.app.Velocity;
 
@@ -14,17 +15,17 @@ import java.io.StringWriter;
 @RequestMapping("/ssti")
 public class SSTI {
 
+    private static final String FIXED_TEMPLATE = "$userInput";
+
     /**
      * SSTI of Java velocity. The latest Velocity version still has this problem.
-     * Fix method: Avoid to use Velocity.evaluate method.
-     * <p>
-     * http://localhost:8080/ssti/velocity?template=%23set($e=%22e%22);$e.getClass().forName(%22java.lang.Runtime%22).getMethod(%22getRuntime%22,null).invoke(null,null).exec(%22open%20-a%20Calculator%22)
-     * Open a calculator in MacOS.
+     * The template text is fixed; user input is only passed as a context
+     * variable (never parsed as a template) and HTML-escaped on output.
      *
-     * @param template exp
+     * @param template user supplied text, treated as plain data
      */
     @GetMapping("/velocity")
-    public void velocity(String template) {
+    public String velocity(String template) {
         Velocity.init();
 
         VelocityContext context = new VelocityContext();
@@ -32,8 +33,10 @@ public class SSTI {
         context.put("author", "Elliot A.");
         context.put("address", "217 E Broadway");
         context.put("phone", "555-1337");
+        context.put("userInput", template == null ? "" : template);
 
         StringWriter swOut = new StringWriter();
-        Velocity.evaluate(context, swOut, "test", template);
+        Velocity.evaluate(context, swOut, "test", FIXED_TEMPLATE);
+        return HtmlUtils.htmlEscape(swOut.toString());
     }
 }
