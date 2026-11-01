@@ -1,5 +1,6 @@
 package org.joychou.controller;
 
+import org.springframework.web.util.HtmlUtils;
 import org.dom4j.DocumentHelper;
 import org.dom4j.io.SAXReader;
 import org.slf4j.Logger;
@@ -267,11 +268,11 @@ public class XXE {
                     buf.append(String.format("%s: %s\n", node.getNodeName(), node.getTextContent()));
                 }
             }
-            return buf.toString();
+            return HtmlUtils.htmlEscape(buf.toString());
         } catch (Exception e) {
             e.printStackTrace();
             logger.error(e.toString());
-            return e.toString();
+            return EXCEPT;
         }
     }
 
@@ -441,7 +442,7 @@ public class XXE {
         HttpEntity<String> post(@RequestBody UserPayload user) {
             try {
                 logger.info(user.toString());
-                return ResponseEntity.ok(String.format("hello, %s!", user.getUserName()));
+                return ResponseEntity.ok(String.format("hello, %s!", HtmlUtils.htmlEscape(String.valueOf(user.getUserName()))));
             }catch (Exception e){
                 e.printStackTrace();
                 return ResponseEntity.ok("error");
