@@ -45,9 +45,12 @@ public class OriginFilter implements Filter {
             return;
         }
 
-        response.setHeader("Access-Control-Allow-Origin", SecurityUtil.cleanCRLF(origin));
-        response.setHeader("Access-Control-Allow-Credentials", "true");
-        response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTION");
+        // origin为空表示同域请求，不设置CORS头；到这里origin已通过白名单校验
+        if (origin != null) {
+            response.setHeader("Access-Control-Allow-Origin", SecurityUtil.cleanCRLF(origin));
+            response.setHeader("Access-Control-Allow-Credentials", "true");
+            response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTION");
+        }
 
         filterChain.doFilter(req, res);
     }

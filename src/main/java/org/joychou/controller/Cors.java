@@ -25,15 +25,22 @@ public class Cors {
     @GetMapping("/vuln/origin")
     public String vuls1(HttpServletRequest request, HttpServletResponse response) {
         String origin = request.getHeader("origin");
-        response.setHeader("Access-Control-Allow-Origin", SecurityUtil.cleanCRLF(origin)); // set origin from header
-        response.setHeader("Access-Control-Allow-Credentials", "true");  // allow cookie
+        // only reflect an origin that is on the safe-domain allowlist, and only then allow cookies
+        if (origin != null && SecurityUtil.checkURL(origin) != null) {
+            response.setHeader("Access-Control-Allow-Origin", SecurityUtil.cleanCRLF(origin));
+            response.setHeader("Access-Control-Allow-Credentials", "true");  // allow cookie
+        }
         return info;
     }
 
     @GetMapping("/vuln/setHeader")
-    public String vuls2(HttpServletResponse response) {
-        // 后端设置Access-Control-Allow-Origin为*的情况下，跨域的时候前端如果设置withCredentials为true会异常
-        response.setHeader("Access-Control-Allow-Origin", "*");
+    public String vuls2(HttpServletRequest request, HttpServletResponse response) {
+        // 不再使用通配符*，仅对白名单内的origin设置Access-Control-Allow-Origin
+        String origin = request.getHeader("Origin");
+        if (origin != null && SecurityUtil.checkURL(origin) != null) {
+            response.setHeader("Access-Control-Allow-Origin", SecurityUtil.cleanCRLF(origin));
+            response.setHeader("Vary", "Origin");
+        }
         return info;
     }
 
@@ -110,8 +117,11 @@ public class Cors {
         if (origin != null && SecurityUtil.checkURL(origin) == null) {
             return "Origin is not safe.";
         }
-        response.setHeader("Access-Control-Allow-Origin", SecurityUtil.cleanCRLF(origin));
-        response.setHeader("Access-Control-Allow-Credentials", "true");
+        // origin为空时不设置CORS头；origin已通过白名单校验时才允许携带cookie
+        if (origin != null) {
+            response.setHeader("Access-Control-Allow-Origin", SecurityUtil.cleanCRLF(origin));
+            response.setHeader("Access-Control-Allow-Credentials", "true");
+        }
         return LoginUtils.getUserInfo2JsonStr(request);
     }
 
