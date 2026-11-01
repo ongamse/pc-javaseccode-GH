@@ -34,9 +34,20 @@ public class XStreamRce {
         dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
         dbf.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
 
-        XStream xstream = new XStream(new DomDriver());
+        XStream xstream = newSecureXStream();
         xstream.fromXML(xml);
         return "xstream";
+    }
+
+    /**
+     * XStream with the security framework enabled: default allowlist of simple
+     * JDK types plus only the application type this endpoint is meant to accept.
+     */
+    private static XStream newSecureXStream() {
+        XStream xstream = new XStream(new DomDriver());
+        XStream.setupDefaultSecurity(xstream);
+        xstream.allowTypes(new Class[]{User.class});
+        return xstream;
     }
 
     public static void main(String[] args) {
