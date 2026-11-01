@@ -12,12 +12,17 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(
+            Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -205,6 +210,31 @@ public class SecurityUtil {
         }
 
         return input;
+    }
+
+
+    /**
+     * Parse a command line into an argv array, only if the executable is on the allowlist
+     * and every argument is a plain token (no option flags, no shell metacharacters).
+     * The result must be run without a shell (ProcessBuilder / Runtime.exec(String[])).
+     *
+     * @param cmdLine command line, whitespace separated
+     * @return argv array; null if the command is not allowed
+     */
+    public static String[] allowedCommandArgv(String cmdLine) {
+        if (cmdLine == null) {
+            return null;
+        }
+        String[] tokens = cmdLine.trim().split("\\s+");
+        if (tokens.length == 0 || !ALLOWED_COMMANDS.contains(tokens[0])) {
+            return null;
+        }
+        for (int i = 1; i < tokens.length; i++) {
+            if (tokens[i].startsWith("-") || cmdFilter(tokens[i]) == null) {
+                return null;
+            }
+        }
+        return tokens;
     }
 
 
