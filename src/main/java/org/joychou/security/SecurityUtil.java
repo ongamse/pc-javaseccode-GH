@@ -27,6 +27,22 @@ public class SecurityUtil {
 
 
     /**
+     * Remove CR and LF characters from a value before it is written into an HTTP header,
+     * to prevent CRLF (header injection / response splitting).
+     * A null value is returned unchanged.
+     *
+     * @param value untrusted header value
+     * @return the value without CR/LF characters
+     */
+    public static String cleanCRLF(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replace("\r", "").replace("\n", "");
+    }
+
+
+    /**
      * Determine if the URL starts with HTTP.
      *
      * @param url url
