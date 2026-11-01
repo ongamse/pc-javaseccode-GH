@@ -1,7 +1,10 @@
 package org.joychou.RMI;
 
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
+import java.rmi.server.RMIServerSocketFactory;
 import java.rmi.server.UnicastRemoteObject;
 
 
@@ -16,9 +19,11 @@ public class Server implements Hello {
 
         try {
             Server obj = new Server();
-            Hello stub = (Hello) UnicastRemoteObject.exportObject(obj, 0);
-            LocateRegistry.createRegistry(1099);
-            Registry registry = LocateRegistry.getRegistry();
+            // Listen on loopback only, not on all interfaces.
+            RMIServerSocketFactory loopbackFactory =
+                    port -> new ServerSocket(port, 0, InetAddress.getLoopbackAddress());
+            Hello stub = (Hello) UnicastRemoteObject.exportObject(obj, 0, null, loopbackFactory);
+            Registry registry = LocateRegistry.createRegistry(1099, null, loopbackFactory);
             registry.bind("Hello", stub);
             System.out.println("绑定1099端口成功");
         } catch (Exception e) {

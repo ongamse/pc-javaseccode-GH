@@ -15,16 +15,27 @@ import java.io.StringWriter;
 public class SSTI {
 
     /**
-     * SSTI of Java velocity. The latest Velocity version still has this problem.
-     * Fix method: Avoid to use Velocity.evaluate method.
+     * Velocity rendering with an allowlist of fixed templates. The request parameter only
+     * selects a template by name; it is never evaluated as template content.
      * <p>
-     * http://localhost:8080/ssti/velocity?template=%23set($e=%22e%22);$e.getClass().forName(%22java.lang.Runtime%22).getMethod(%22getRuntime%22,null).invoke(null,null).exec(%22open%20-a%20Calculator%22)
-     * Open a calculator in MacOS.
+     * http://localhost:8080/ssti/velocity?template=address
      *
-     * @param template exp
+     * @param template template name, one of: author, address, phone
+     * @return rendered output of the selected fixed template
      */
     @GetMapping("/velocity")
-    public void velocity(String template) {
+    public String velocity(String template) {
+        String fixedTemplate;
+        if ("author".equals(template)) {
+            fixedTemplate = "Author: $author";
+        } else if ("address".equals(template)) {
+            fixedTemplate = "Address: $address";
+        } else if ("phone".equals(template)) {
+            fixedTemplate = "Phone: $phone";
+        } else {
+            return "Unknown template. Allowed: author, address, phone";
+        }
+
         Velocity.init();
 
         VelocityContext context = new VelocityContext();
@@ -34,6 +45,7 @@ public class SSTI {
         context.put("phone", "555-1337");
 
         StringWriter swOut = new StringWriter();
-        Velocity.evaluate(context, swOut, "test", template);
+        Velocity.evaluate(context, swOut, "test", fixedTemplate);
+        return swOut.toString();
     }
 }

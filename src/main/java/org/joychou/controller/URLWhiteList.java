@@ -1,6 +1,7 @@
 package org.joychou.controller;
 
 
+import org.springframework.web.util.HtmlUtils;
 import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -100,18 +101,23 @@ public class URLWhiteList {
 
         logger.info("url:  " + url);
 
-        if (!SecurityUtil.isHttp(url)) {
+        // Only redirect to hosts allowed by the project's safe-domain config.
+        String safeUrl = SecurityUtil.checkURL(url);
+        if (safeUrl == null) {
+            res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            res.getWriter().write("url forbidden");
             return;
         }
 
-        URL u = new URL(url);
+        URL u = new URL(safeUrl);
         String host = u.getHost();
         logger.info("host:  " + host);
 
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                res.sendRedirect(safeUrl);
+                return;
             }
         }
 
@@ -135,9 +141,9 @@ public class URLWhiteList {
 
         for (String whiteHost: whiteDomainlists){
             if (whiteHost.startsWith(".") && host.endsWith(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             } else if (!whiteHost.startsWith(".") && host.equals(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             }
         }
 

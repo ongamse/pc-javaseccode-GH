@@ -9,8 +9,19 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.multipart.MultipartFile;
 
+import org.xml.sax.SAXException;
+import org.xml.sax.helpers.DefaultHandler;
+
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.parsers.SAXParser;
+import javax.xml.parsers.SAXParserFactory;
+import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 
 /**
@@ -34,7 +45,49 @@ public class xlsxStreamerXXE {
 
     @PostMapping("/readxlsx")
     public void xllx_streamer_xxe(MultipartFile file) throws IOException {
-        StreamingReader.builder().open(file.getInputStream());
+        byte[] content = file.getBytes();
+        rejectXmlWithDoctype(content);
+        StreamingReader.builder().open(new ByteArrayInputStream(content));
+    }
+
+    /**
+     * Stream every XML part of the xlsx package through a SAX parser that forbids DOCTYPE
+     * declarations, so external entities cannot reach the library's internal XML parsing.
+     */
+    private static void rejectXmlWithDoctype(byte[] content) throws IOException {
+        try {
+            SAXParserFactory spf = SAXParserFactory.newInstance();
+            spf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            spf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            spf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            SAXParser parser = spf.newSAXParser();
+
+            try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(content))) {
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    String name = entry.getName().toLowerCase();
+                    if (entry.isDirectory() || !(name.endsWith(".xml") || name.endsWith(".rels"))) {
+                        continue;
+                    }
+                    parser.reset();
+                    parser.parse(new CloseShieldInputStream(zis), new DefaultHandler());
+                }
+            }
+        } catch (ParserConfigurationException | SAXException e) {
+            throw new IOException("Invalid or unsafe xlsx content", e);
+        }
+    }
+
+    /** Prevents the SAX parser from closing the underlying zip stream. */
+    private static final class CloseShieldInputStream extends FilterInputStream {
+        CloseShieldInputStream(InputStream in) {
+            super(in);
+        }
+
+        @Override
+        public void close() {
+            // keep the zip stream open for the next entry
+        }
     }
 
 

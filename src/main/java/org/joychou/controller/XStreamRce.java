@@ -7,7 +7,11 @@ import org.joychou.util.WebUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import org.xml.sax.InputSource;
+
 import javax.servlet.http.HttpServletRequest;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.StringReader;
 
 
 @RestController
@@ -23,9 +27,27 @@ public class XStreamRce {
     @PostMapping("/xstream")
     public String parseXml(HttpServletRequest request) throws Exception {
         String xml = WebUtils.getRequestBody(request);
-        XStream xstream = new XStream(new DomDriver());
+        // Reject DOCTYPE / external entities before the XML reaches XStream's DOM parser.
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+        dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        dbf.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+
+        XStream xstream = newSecureXStream();
         xstream.fromXML(xml);
         return "xstream";
+    }
+
+    /**
+     * XStream with the security framework enabled: default allowlist of simple
+     * JDK types plus only the application type this endpoint is meant to accept.
+     */
+    private static XStream newSecureXStream() {
+        XStream xstream = new XStream(new DomDriver());
+        XStream.setupDefaultSecurity(xstream);
+        xstream.allowTypes(new Class[]{User.class});
+        return xstream;
     }
 
     public static void main(String[] args) {
