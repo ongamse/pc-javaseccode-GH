@@ -7,6 +7,10 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
@@ -41,6 +45,27 @@ public class SQLI {
 
     @Resource
     private UserMapper userMapper;
+
+
+    /**
+     * Object-level authorization: a request-supplied username may only be used to look up
+     * the authenticated user's own record, unless the caller has the ADMIN role.
+     * Fails closed when there is no authenticated principal.
+     */
+    private static void checkUserAccess(String requestedUsername) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getName() == null) {
+            throw new AccessDeniedException("Access denied");
+        }
+        for (GrantedAuthority authority : auth.getAuthorities()) {
+            if ("ROLE_ADMIN".equals(authority.getAuthority())) {
+                return;
+            }
+        }
+        if (requestedUsername == null || !auth.getName().equals(requestedUsername)) {
+            throw new AccessDeniedException("Access denied");
+        }
+    }
 
 
     /**
@@ -94,6 +119,8 @@ public class SQLI {
      */
     @RequestMapping("/jdbc/sec")
     public String jdbc_sqli_sec(@RequestParam("username") String username) {
+
+        checkUserAccess(username);
 
         StringBuilder result = new StringBuilder();
         try {
@@ -182,6 +209,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln01")
     public List<User> mybatisVuln01(@RequestParam("username") String username) {
+        checkUserAccess(username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -192,6 +220,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln02")
     public List<User> mybatisVuln02(@RequestParam("username") String username) {
+        checkUserAccess(username);
         return userMapper.findByUserNameVuln02(username);
     }
 
@@ -212,6 +241,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec01")
     public User mybatisSec01(@RequestParam("username") String username) {
+        checkUserAccess(username);
         return userMapper.findByUserName(username);
     }
 
@@ -221,7 +251,11 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec02")
     public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+        User found = userMapper.findById(id);
+        if (found != null) {
+            checkUserAccess(found.getUsername());
+        }
+        return found;
     }
 
 
