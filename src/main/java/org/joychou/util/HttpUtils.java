@@ -12,6 +12,7 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
 import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
+import org.joychou.security.SecurityUtil;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.slf4j.Logger;
@@ -178,7 +179,15 @@ public class HttpUtils {
      */
     public static void imageIO(String url) {
         try {
+            // Only http(s) is allowed; file:/jar: etc. would read local files.
+            if (url == null || !SecurityUtil.isHttp(url)) {
+                logger.error("Illegal url scheme: only http and https are allowed");
+                return;
+            }
             URL u = new URL(url);
+            if (!"http".equalsIgnoreCase(u.getProtocol()) && !"https".equalsIgnoreCase(u.getProtocol())) {
+                return;
+            }
             ImageIO.read(u); // send request
         } catch (IOException e) {
             logger.error(e.getMessage());
