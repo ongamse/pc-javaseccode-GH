@@ -7,11 +7,15 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import javax.annotation.Resource;
+import java.security.Principal;
 import java.sql.*;
 import java.util.List;
+import java.util.stream.Collectors;
 
 
 /**
@@ -41,6 +45,17 @@ public class SQLI {
 
     @Resource
     private UserMapper userMapper;
+
+    /**
+     * Object-level authorization: a user record may only be read by its owner.
+     * Fails closed (403) when unauthenticated or when the requested username
+     * is not the authenticated principal.
+     */
+    private static void assertOwner(Principal principal, String username) {
+        if (principal == null || username == null || !principal.getName().equals(username)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
+    }
 
 
     /**
@@ -93,8 +108,9 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/sec?username=joychou">http://localhost:8080/sqli/jdbc/sec?username=joychou</a>
      */
     @RequestMapping("/jdbc/sec")
-    public String jdbc_sqli_sec(@RequestParam("username") String username) {
+    public String jdbc_sqli_sec(@RequestParam("username") String username, Principal principal) {
 
+        assertOwner(principal, username);
         StringBuilder result = new StringBuilder();
         try {
             Class.forName(driver);
@@ -181,7 +197,8 @@ public class SQLI {
      * <p>select * from users where username = 'joychou' or '1'='1' </p>
      */
     @GetMapping("/mybatis/vuln01")
-    public List<User> mybatisVuln01(@RequestParam("username") String username) {
+    public List<User> mybatisVuln01(@RequestParam("username") String username, Principal principal) {
+        assertOwner(principal, username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -191,8 +208,12 @@ public class SQLI {
      * <p>select * from users where username like '%joychou' or '1'='1%' </p>
      */
     @GetMapping("/mybatis/vuln02")
-    public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+    public List<User> mybatisVuln02(@RequestParam("username") String username, Principal principal) {
+        assertOwner(principal, username);
+        // The LIKE search may match other users (e.g. "joychou2"); only return the caller's own record.
+        return userMapper.findByUserNameVuln02(username).stream()
+                .filter(u -> principal.getName().equals(u.getUsername()))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -211,7 +232,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec01?username=joychou">http://localhost:8080/sqli/mybatis/sec01?username=joychou</a>
      */
     @GetMapping("/mybatis/sec01")
-    public User mybatisSec01(@RequestParam("username") String username) {
+    public User mybatisSec01(@RequestParam("username") String username, Principal principal) {
+        assertOwner(principal, username);
         return userMapper.findByUserName(username);
     }
 
@@ -220,8 +242,15 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec02?id=1">http://localhost:8080/sqli/mybatis/sec02?id=1</a>
      */
     @GetMapping("/mybatis/sec02")
-    public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+    public User mybatisSec02(@RequestParam("id") Integer id, Principal principal) {
+        User found = userMapper.findById(id);
+        // Same response for missing and foreign records so ids cannot be enumerated.
+        if (found != null) {
+            assertOwner(principal, found.getUsername());
+        } else {
+            assertOwner(principal, null);
+        }
+        return found;
     }
 
 
