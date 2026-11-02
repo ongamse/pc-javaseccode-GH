@@ -1,5 +1,6 @@
 package org.joychou.controller;
 
+import org.springframework.web.util.HtmlUtils;
 import org.springframework.expression.ConstructorResolver;
 import org.springframework.expression.ExpressionParser;
 import org.springframework.expression.MethodResolver;
@@ -33,7 +34,7 @@ public class SpEL {
     public String rce(String expression) {
         ExpressionParser parser = new SpelExpressionParser();
         Object value = parser.parseExpression(expression).getValue(restrictedContext());
-        return String.valueOf(value);
+        return HtmlUtils.htmlEscape(String.valueOf(value));
     }
 
     /**
