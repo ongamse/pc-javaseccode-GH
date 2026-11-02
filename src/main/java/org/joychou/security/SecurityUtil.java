@@ -12,6 +12,9 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
@@ -150,6 +153,17 @@ public class SecurityUtil {
     }
 
     /**
+     * Validate a url before the server requests it: http/https only and every resolved
+     * address must be public. Callers must also disable redirect following.
+     *
+     * @param url The url that needs to check.
+     * @return Safe url returns true. Dangerous url returns false.
+     */
+    public static boolean isSafeOutboundUrl(String url) {
+        return SSRFChecker.isSafeOutboundUrl(url);
+    }
+
+    /**
      * Check ssrf by hook socket. Start socket hook.
      *
      * @author liergou @ 2020-04-04 02:15
@@ -205,6 +219,55 @@ public class SecurityUtil {
         }
 
         return input;
+    }
+
+    private static final Pattern CRLF_PATTERN = Pattern.compile("[\\r\\n]|%0[dD]|%0[aA]");
+
+    /**
+     * Remove CR and LF (raw or percent-encoded) from a value that is written into an HTTP
+     * response header, to prevent header injection / response splitting.
+     *
+     * @param value untrusted header value
+     * @return value without CR/LF, or null if value is null
+     */
+    public static String crlfFilter(String value) {
+        if (value == null) {
+            return null;
+        }
+        String prev;
+        String cur = value;
+        do {
+            prev = cur;
+            cur = CRLF_PATTERN.matcher(prev).replaceAll("");
+        } while (!cur.equals(prev));
+        return cur;
+    }
+
+    private static final Set<String> CMD_ALLOWLIST =new HashSet<>(
+            Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname", "ls"));
+    private static final Pattern CMD_ARG_PATTERN = Pattern.compile("^[a-zA-Z0-9_/.=-]+$");
+
+    /**
+     * Split a user supplied command line into an argv array without involving a shell.
+     * Only allowlisted program names and plain arguments are accepted.
+     *
+     * @param cmd command line, e.g. <code>ls -la /tmp</code>
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] safeCmd(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (argv.length == 0 || !CMD_ALLOWLIST.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!CMD_ARG_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
     }
 
 

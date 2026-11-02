@@ -49,6 +49,60 @@ public class SSRFChecker {
     }
 
     /**
+     * Strict validation for outbound requests: only http/https, a plain host (no user info),
+     * and every address the host resolves to must be a public address (not loopback, any-local,
+     * link-local, private, multicast, shared address space or inside the configured block subnets).
+     * Callers must not follow redirects to unvalidated hosts.
+     *
+     * @param url the url that is about to be requested
+     * @return true if the url may be requested, false otherwise (fail closed)
+     */
+    public static boolean isSafeOutboundUrl(String url) {
+        if (url == null || !SecurityUtil.isHttp(url)) {
+            return false;
+        }
+        try {
+            URI u = new URI(url);
+            String host = u.getHost();
+            if (host == null || host.isEmpty() || u.getRawUserInfo() != null) {
+                return false;
+            }
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            if (addresses.length == 0) {
+                return false;
+            }
+            for (InetAddress address : addresses) {
+                if (isBlockedAddress(address)) {
+                    logger.error("[-] SSRF check failed. Blocked address: " + address.getHostAddress());
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+
+    private static boolean isBlockedAddress(InetAddress address) {
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress() || address.isMulticastAddress()) {
+            return true;
+        }
+        byte[] raw = address.getAddress();
+        if (raw.length == 4) {
+            // 100.64.0.0/10 shared address space (used by some cloud metadata services)
+            if ((raw[0] & 0xff) == 100 && (raw[1] & 0xc0) == 0x40) {
+                return true;
+            }
+            return isInternalIp(address.getHostAddress());
+        }
+        // fc00::/7 unique local addresses
+        return (raw[0] & 0xfe) == 0xfc;
+    }
+
+
+    /**
      * 解析url的ip，判断ip是否是内网ip，所以TTL设置为0的情况不适用。
      * url只允许https或者http，并且设置默认连接超时时间。
      * 该修复方案会主动请求重定向后的链接。
