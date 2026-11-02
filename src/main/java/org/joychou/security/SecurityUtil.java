@@ -153,6 +153,17 @@ public class SecurityUtil {
     }
 
     /**
+     * Validate a url before the server requests it: http/https only and every resolved
+     * address must be public. Callers must also disable redirect following.
+     *
+     * @param url The url that needs to check.
+     * @return Safe url returns true. Dangerous url returns false.
+     */
+    public static boolean isSafeOutboundUrl(String url) {
+        return SSRFChecker.isSafeOutboundUrl(url);
+    }
+
+    /**
      * Check ssrf by hook socket. Start socket hook.
      *
      * @author liergou @ 2020-04-04 02:15
