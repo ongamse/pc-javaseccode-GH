@@ -12,6 +12,9 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
@@ -205,6 +208,33 @@ public class SecurityUtil {
         }
 
         return input;
+    }
+
+    private static final Set<String> CMD_ALLOWLIST = new HashSet<>(
+            Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname", "ls"));
+    private static final Pattern CMD_ARG_PATTERN = Pattern.compile("^[a-zA-Z0-9_/.=-]+$");
+
+    /**
+     * Split a user supplied command line into an argv array without involving a shell.
+     * Only allowlisted program names and plain arguments are accepted.
+     *
+     * @param cmd command line, e.g. <code>ls -la /tmp</code>
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] safeCmd(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (argv.length == 0 || !CMD_ALLOWLIST.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!CMD_ARG_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
     }
 
 

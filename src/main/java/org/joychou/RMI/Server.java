@@ -17,8 +17,10 @@ public class Server implements Hello {
         try {
             Server obj = new Server();
             Hello stub = (Hello) UnicastRemoteObject.exportObject(obj, 0);
-            LocateRegistry.createRegistry(1099);
-            Registry registry = LocateRegistry.getRegistry();
+            // JEP 290 registry deserialization filter: only the types needed to bind/lookup a remote stub
+            System.setProperty("sun.rmi.registry.registryFilter",
+                    "java.lang.String;java.lang.Number;java.lang.reflect.Proxy;java.rmi.**;sun.rmi.**;org.joychou.RMI.*;!*");
+            Registry registry = LocateRegistry.createRegistry(1099);
             registry.bind("Hello", stub);
             System.out.println("绑定1099端口成功");
         } catch (Exception e) {
