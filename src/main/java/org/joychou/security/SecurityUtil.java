@@ -221,7 +221,29 @@ public class SecurityUtil {
         return input;
     }
 
-    private static final Set<String> CMD_ALLOWLIST = new HashSet<>(
+    private static final Pattern CRLF_PATTERN = Pattern.compile("[\\r\\n]|%0[dD]|%0[aA]");
+
+    /**
+     * Remove CR and LF (raw or percent-encoded) from a value that is written into an HTTP
+     * response header, to prevent header injection / response splitting.
+     *
+     * @param value untrusted header value
+     * @return value without CR/LF, or null if value is null
+     */
+    public static String crlfFilter(String value) {
+        if (value == null) {
+            return null;
+        }
+        String prev;
+        String cur = value;
+        do {
+            prev = cur;
+            cur = CRLF_PATTERN.matcher(prev).replaceAll("");
+        } while (!cur.equals(prev));
+        return cur;
+    }
+
+    private static final Set<String> CMD_ALLOWLIST =new HashSet<>(
             Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname", "ls"));
     private static final Pattern CMD_ARG_PATTERN = Pattern.compile("^[a-zA-Z0-9_/.=-]+$");
 
