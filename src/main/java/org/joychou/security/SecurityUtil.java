@@ -56,6 +56,88 @@ public class SecurityUtil {
 
 
     /**
+     * Strictly parse an absolute http(s) url and return its lower-cased host.
+     * Rejects anything that browsers and java.net parsers may disagree on:
+     * backslashes, whitespace/control characters, userinfo ("user@host") and
+     * urls without a host.
+     *
+     * @param url untrusted url
+     * @return the host, or null if the url is not a clean absolute http(s) url
+     */
+    public static String strictHttpHost(String url) {
+        if (url == null || !isHttp(url)) {
+            return null;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char ch = url.charAt(i);
+            if (ch == '\\' || ch <= ' ' || Character.isISOControl(ch) || Character.isWhitespace(ch)
+                    || ch == '\u2028' || ch == '\u2029') {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(url);
+            if (uri.getUserInfo() != null || uri.getRawAuthority() == null) {
+                return null;
+            }
+            String host = uri.getHost();
+            return (host == null || host.isEmpty()) ? null : host.toLowerCase();
+        } catch (URISyntaxException e) {
+            return null;
+        }
+    }
+
+
+    /**
+     * Allow only a same-site absolute path such as <code>/a/b?c=d</code>.
+     * Scheme-relative ("//host"), backslash forms ("/\host") and control characters are rejected.
+     *
+     * @param path untrusted path
+     * @return the path, or null if it is not a safe local path
+     */
+    public static String checkLocalPath(String path) {
+        if (path == null || path.length() == 0 || path.charAt(0) != '/') {
+            return null;
+        }
+        if (path.length() > 1 && (path.charAt(1) == '/' || path.charAt(1) == '\\')) {
+            return null;
+        }
+        for (int i = 0; i < path.length(); i++) {
+            char ch = path.charAt(i);
+            if (ch == '\\' || ch <= ' ' || Character.isISOControl(ch) || Character.isWhitespace(ch)
+                    || ch == '\u2028' || ch == '\u2029') {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(path);
+            if (uri.isAbsolute() || uri.getRawAuthority() != null) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return path;
+    }
+
+
+    /**
+     * Validate a redirect target: either a url whose host is allowlisted by {@link #checkURL(String)}
+     * or a same-site local path.
+     *
+     * @param target untrusted redirect target
+     * @return the target if safe; null otherwise
+     */
+    public static String checkRedirectTarget(String target) {
+        String local = checkLocalPath(target);
+        if (local != null) {
+            return local;
+        }
+        return checkURL(target);
+    }
+
+
+    /**
      * 同时支持一级域名和多级域名，相关配置在resources目录下url/url_safe_domain.xml文件。
      * 优先判断黑名单，如果满足黑名单return null。
      *
@@ -72,10 +154,9 @@ public class SecurityUtil {
         ArrayList<String> blockDomains = WebConfig.getBlockDomains();
 
         try {
-            String host = gethost(url);
-
-            // 必须http/https
-            if (!isHttp(url)) {
+            // 必须http/https，且不能包含反斜杠、userinfo等解析差异
+            String host = strictHttpHost(url);
+            if (host == null) {
                 return null;
             }
 
