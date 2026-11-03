@@ -29,6 +29,8 @@ public class XStreamRce {
         String xml = WebUtils.getRequestBody(request);
         rejectDoctype(xml);
         XStream xstream = new XStream(new DomDriver());
+        XStream.setupDefaultSecurity(xstream);  // allowlist (deny all by default)
+        xstream.allowTypes(new Class[]{User.class});
         xstream.fromXML(xml);
         return "xstream";
     }
