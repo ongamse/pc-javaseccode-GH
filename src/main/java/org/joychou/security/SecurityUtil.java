@@ -12,12 +12,18 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern SAFE_ARG_PATTERN = Pattern.compile("^-{0,2}[a-zA-Z0-9]+$");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "date", "hostname", "uname", "pwd"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -41,10 +47,93 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
+    }
+
+
+    /**
+     * Strictly parse an absolute http(s) url and return its lower-cased host.
+     * Rejects anything that browsers and java.net parsers may disagree on:
+     * backslashes, whitespace/control characters, userinfo ("user@host") and
+     * urls without a host.
+     *
+     * @param url untrusted url
+     * @return the host, or null if the url is not a clean absolute http(s) url
+     */
+    public static String strictHttpHost(String url) {
+        if (url == null || !isHttp(url)) {
+            return null;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char ch = url.charAt(i);
+            if (ch == '\\' || ch <= ' ' || Character.isISOControl(ch) || Character.isWhitespace(ch)
+                    || ch == '\u2028' || ch == '\u2029') {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(url);
+            if (uri.getUserInfo() != null || uri.getRawAuthority() == null) {
+                return null;
+            }
+            String host = uri.getHost();
+            return (host == null || host.isEmpty()) ? null : host.toLowerCase();
+        } catch (URISyntaxException e) {
+            return null;
+        }
+    }
+
+
+    /**
+     * Allow only a same-site absolute path such as <code>/a/b?c=d</code>.
+     * Scheme-relative ("//host"), backslash forms ("/\host") and control characters are rejected.
+     *
+     * @param path untrusted path
+     * @return the path, or null if it is not a safe local path
+     */
+    public static String checkLocalPath(String path) {
+        if (path == null || path.length() == 0 || path.charAt(0) != '/') {
+            return null;
+        }
+        if (path.length() > 1 && (path.charAt(1) == '/' || path.charAt(1) == '\\')) {
+            return null;
+        }
+        for (int i = 0; i < path.length(); i++) {
+            char ch = path.charAt(i);
+            if (ch == '\\' || ch <= ' ' || Character.isISOControl(ch) || Character.isWhitespace(ch)
+                    || ch == '\u2028' || ch == '\u2029') {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(path);
+            if (uri.isAbsolute() || uri.getRawAuthority() != null) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return path;
+    }
+
+
+    /**
+     * Validate a redirect target: either a url whose host is allowlisted by {@link #checkURL(String)}
+     * or a same-site local path.
+     *
+     * @param target untrusted redirect target
+     * @return the target if safe; null otherwise
+     */
+    public static String checkRedirectTarget(String target) {
+        String local = checkLocalPath(target);
+        if (local != null) {
+            return local;
+        }
+        return checkURL(target);
     }
 
 
@@ -65,10 +154,9 @@ public class SecurityUtil {
         ArrayList<String> blockDomains = WebConfig.getBlockDomains();
 
         try {
-            String host = gethost(url);
-
-            // 必须http/https
-            if (!isHttp(url)) {
+            // 必须http/https，且不能包含反斜杠、userinfo等解析差异
+            String host = strictHttpHost(url);
+            if (host == null) {
                 return null;
             }
 
@@ -98,6 +186,32 @@ public class SecurityUtil {
             logger.error(e.toString());
             return null;
         }
+    }
+
+
+    /**
+     * Validate a CORS request origin. The origin must be a bare <code>scheme://host[:port]</code>
+     * (browsers never send a path, query or fragment in an Origin header) whose host is
+     * allowlisted by {@link #checkURL(String)}.
+     *
+     * @param origin untrusted value of the Origin request header
+     * @return the origin if it is allowlisted; null otherwise
+     */
+    public static String checkOrigin(String origin) {
+        if (checkURL(origin) == null) {
+            return null;
+        }
+        try {
+            URI uri = new URI(origin);
+            String path = uri.getRawPath();
+            if ((path != null && !path.isEmpty()) || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return origin;
     }
 
 
@@ -200,11 +314,35 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Parse a user supplied command line into an argv array for direct execution (no shell).
+     * Only allowlisted programs with simple option-style arguments are accepted.
+     *
+     * @param cmd user supplied command line, e.g. "ls -la"
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] safeCommand(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (argv.length == 0 || !ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!SAFE_ARG_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
     }
 
 
@@ -246,6 +384,27 @@ public class SecurityUtil {
             }
         }
 
+        return sb.toString();
+    }
+
+    /**
+     * Remove CR, LF and all other ISO control characters so that an untrusted value
+     * can be safely written into an HTTP response header (prevents header injection).
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch) && ch != '\u2028' && ch != '\u2029') {
+                sb.append(ch);
+            }
+        }
         return sb.toString();
     }
 

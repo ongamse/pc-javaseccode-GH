@@ -1,10 +1,12 @@
 package org.joychou.security.ssrf;
 
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.regex.Pattern;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.net.util.SubnetUtils;
@@ -17,7 +19,10 @@ import org.slf4j.LoggerFactory;
 public class SSRFChecker {
 
     private static final Logger logger = LoggerFactory.getLogger(SSRFChecker.class);
-    private static String decimalIp;
+    private static final Pattern NUMERIC_HOST =
+            Pattern.compile("^(0[xX][0-9a-fA-F]*|[0-9]+)(\\.(0[xX][0-9a-fA-F]*|[0-9]+))*\\.?$");
+    private static final Pattern CANONICAL_IPV4 = Pattern.compile(
+            "^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$");
 
     public static boolean checkURLFckSSRF(String url) {
         if (null == url) {
@@ -71,6 +76,7 @@ public class SSRFChecker {
                     return false;  // 内网ip直接return，非内网ip继续判断是否有重定向
                 }
 
+                // Only http/https and non-internal hosts reach this point (see isInternalIpByUrl).
                 connection = (HttpURLConnection) new URL(finalUrl).openConnection();
                 connection.setInstanceFollowRedirects(false);
                 connection.setUseCaches(false); // 设置为false，手动处理跳转，可以拿到每个跳转的URL
@@ -82,7 +88,9 @@ public class SSRFChecker {
                     String redirectedUrl = connection.getHeaderField("Location");
                     if (null == redirectedUrl)
                         break;
-                    finalUrl = redirectedUrl;
+                    // Location may be relative; resolve it against the current URL so the
+                    // next iteration validates exactly the URL that would be requested.
+                    finalUrl = new URI(finalUrl).resolve(redirectedUrl).toString();
                     i += 1;  // 重定向次数加1
                     logger.info("redirected url: " + finalUrl);
                     if (i == checkTimes) {
@@ -93,7 +101,8 @@ public class SSRFChecker {
             } while (connection.getResponseCode() != HttpURLConnection.HTTP_OK);
             connection.disconnect();
         } catch (Exception e) {
-            return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
+            logger.error("SSRF check error: " + e.getMessage());
+            return false;  // Fail closed: a URL that cannot be validated is not safe.
         }
         return true; // 默认返回true
     }
@@ -107,21 +116,67 @@ public class SSRFChecker {
     public static boolean isInternalIpByUrl(String url) {
 
         String host = url2host(url);
-        if (host.equals("")) {
+        if (host == null || host.equals("")) {
             return true; // 异常URL当成内网IP等非法URL处理
         }
 
-        String ip = host2ip(host);
-        if (ip.equals("")) {
+        // Shorthand IPv4 forms (decimal "2130706433", hex "0x7f.1", octal "0177.0.0.1", "127.1")
+        // are interpreted differently by different resolvers/clients, so only the canonical
+        // dotted-quad form is accepted for numeric hosts.
+        if (NUMERIC_HOST.matcher(host).matches() && !CANONICAL_IPV4.matcher(host).matches()) {
+            logger.error("[-] SSRF check failed. Non-canonical numeric host: " + host);
+            return true;
+        }
+
+        InetAddress[] addresses;
+        try {
+            // send dns request. Every returned address must be public, otherwise a
+            // multi-record answer could smuggle in an internal address.
+            addresses = InetAddress.getAllByName(host);
+        } catch (Exception e) {
+            logger.error("host resolve exception " + e.getMessage());
             return true; // 如果域名转换为IP异常，则认为是非法URL
         }
 
-        return isInternalIp(ip);
+        for (InetAddress address : addresses) {
+            if (isInternalAddress(address)) {
+                return true;
+            }
+        }
+        return false;
     }
 
 
     /**
-     * 使用SubnetUtils库判断ip是否在内网网段
+     * Check that a URL is an http/https URL whose host only resolves to public addresses.
+     * Fails closed on any parsing or resolution problem.
+     *
+     * @param url the url to check
+     * @return true if the URL may be requested, false otherwise
+     */
+    public static boolean isSafeUrl(String url) {
+        if (url == null) {
+            return false;
+        }
+        try {
+            String host = url2host(url);
+            if (host == null || host.equals("")) {
+                return false;
+            }
+            // Guard against parser differentials between java.net.URI and java.net.URL.
+            String urlHost = new URL(url).getHost();
+            if (!host.equalsIgnoreCase(urlHost)) {
+                return false;
+            }
+            return !isInternalIpByUrl(url);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+
+    /**
+     * 判断ip是否在内网网段
      *
      * @param strIP ip字符串
      * @return 如果是内网ip，返回true，否则返回false。
@@ -132,17 +187,55 @@ public class SSRFChecker {
             return true;
         }
 
-        ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
-        for (String subnet : blackSubnets) {
-            SubnetUtils utils = new SubnetUtils(subnet);
-            if (utils.getInfo().isInRange(strIP)) {
-                logger.error("[-] SSRF check failed. Internal IP: " + strIP);
-                return true;
+        InetAddress address;
+        try {
+            address = InetAddress.getByName(strIP);
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Illegal IP: " + strIP);
+            return true;
+        }
+        return isInternalAddress(address);
+    }
+
+
+    /**
+     * Check a resolved address: loopback, wildcard, link-local (incl. cloud metadata
+     * 169.254.169.254), private, unique-local IPv6, carrier-grade NAT, multicast, and the
+     * configured IPv4 block subnets.
+     */
+    private static boolean isInternalAddress(InetAddress address) {
+        String strIP = address.getHostAddress();
+        boolean internal = address.isAnyLocalAddress()
+                || address.isLoopbackAddress()
+                || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress()
+                || address.isMulticastAddress();
+
+        byte[] raw = address.getAddress();
+        if (!internal && raw.length == 16) {
+            // fc00::/7 unique local addresses
+            internal = (raw[0] & 0xfe) == 0xfc;
+        }
+        if (!internal && raw.length == 4) {
+            // 100.64.0.0/10 carrier-grade NAT
+            internal = (raw[0] & 0xff) == 100 && (raw[1] & 0xc0) == 64;
+        }
+
+        if (!internal && address instanceof Inet4Address) {
+            ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
+            for (String subnet : blackSubnets) {
+                SubnetUtils utils = new SubnetUtils(subnet);
+                if (utils.getInfo().isInRange(strIP)) {
+                    internal = true;
+                    break;
+                }
             }
         }
 
-        return false;
-
+        if (internal) {
+            logger.error("[-] SSRF check failed. Internal IP: " + strIP);
+        }
+        return internal;
     }
 
 
@@ -179,8 +272,9 @@ public class SSRFChecker {
         }
 
          // convert octal to decimal
-         if(isOctalIP(host)) {
-             host = decimalIp;
+         String converted = octalToDecimalIp(host);
+         if (converted != null) {
+             host = converted;
          }
 
         try {
@@ -199,6 +293,17 @@ public class SSRFChecker {
      * @return Octal ip returns true, others return false. 012.23.78.233 return true. 012.0x17.78.233 return false.
      */
     public static boolean isOctalIP(String host) {
+        return octalToDecimalIp(host) != null;
+    }
+
+
+    /**
+     * Convert an octal ip to decimal. Local result (no shared static state) so concurrent
+     * requests cannot observe each other's converted value.
+     *
+     * @return the decimal ip, or null if the host is not an octal ip
+     */
+    private static String octalToDecimalIp(String host) {
         try{
             String[] ipParts = host.split("\\.");
             StringBuilder newDecimalIP = new StringBuilder();
@@ -210,44 +315,45 @@ public class SSRFChecker {
                 // not support ipv6
                 if (ipParts.length > 4) {
                     logger.error("Illegal ipv4: " + host);
-                    return false;
+                    return null;
                 }
 
                 // 01205647351
                 if( ipParts.length == 1 && host.startsWith("0") ) {
-                    decimalIp = Integer.valueOf(host, 8).toString();
-                    return true;
+                    return Integer.valueOf(host, 8).toString();
                 }
 
                 // 012.23.78.233
                 for(String ip : ipParts) {
                     if (!isNumber(ip)){
                         logger.error("Illegal ipv4: " + host);
-                        return false;
+                        return null;
                     }
                     // start with "0", but not "0"
                     if (ip.startsWith("0") && !ip.equals("0")) {
                         if (Integer.valueOf(ip, 8) >= 256){
                             logger.error("Illegal ipv4: " + host);
-                            return false;
+                            return null;
                         }
                         newDecimalIP.append(Integer.valueOf(ip, 8)).append(".");
                         is_octal = true;
                     }else{
                         if (Integer.valueOf(ip, 10) >= 256) {
                             logger.error("Illegal ipv4: " + host);
-                            return false;
+                            return null;
                         }
                         newDecimalIP.append(ip).append(".");
                     }
                 }
-                // delete last char .
-                decimalIp = newDecimalIP.substring(0, newDecimalIP.lastIndexOf("."));
+                if (is_octal) {
+                    // delete last char .
+                    return newDecimalIP.substring(0, newDecimalIP.lastIndexOf("."));
+                }
             }
-            return is_octal;
+            return null;
         } catch (Exception e){
             logger.error("SSRFChecker isOctalIP exception: " + e.getMessage());
-            return false;
+            return null;
         }
 
     }
