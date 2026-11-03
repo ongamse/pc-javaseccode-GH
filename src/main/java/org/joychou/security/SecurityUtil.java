@@ -190,6 +190,32 @@ public class SecurityUtil {
 
 
     /**
+     * Validate a CORS request origin. The origin must be a bare <code>scheme://host[:port]</code>
+     * (browsers never send a path, query or fragment in an Origin header) whose host is
+     * allowlisted by {@link #checkURL(String)}.
+     *
+     * @param origin untrusted value of the Origin request header
+     * @return the origin if it is allowlisted; null otherwise
+     */
+    public static String checkOrigin(String origin) {
+        if (checkURL(origin) == null) {
+            return null;
+        }
+        try {
+            URI uri = new URI(origin);
+            String path = uri.getRawPath();
+            if ((path != null && !path.isEmpty()) || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return origin;
+    }
+
+
+    /**
      * 通过自定义白名单域名处理SSRF漏洞。如果URL范围收敛，强烈建议使用该方案。
      * 这是最简单也最有效的修复方式。因为SSRF都是发起URL请求时造成，大多数场景是图片场景，一般图片的域名都是CDN或者OSS等，所以限定域名白名单即可完成SSRF漏洞修复。
      *
