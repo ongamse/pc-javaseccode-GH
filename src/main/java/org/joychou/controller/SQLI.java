@@ -11,7 +11,10 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import java.sql.*;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 
 /**
@@ -29,6 +32,9 @@ public class SQLI {
 
     // com.mysql.jdbc.Driver is deprecated. Change to com.mysql.cj.jdbc.Driver.
     private static final String driver = "com.mysql.cj.jdbc.Driver";
+
+    // Columns of the users table that clients may sort by.
+    private static final Set<String> ORDER_BY_ALLOWLIST = new HashSet<>(Arrays.asList("id", "username"));
 
     @Value("${spring.datasource.url}")
     private String url;
@@ -61,10 +67,11 @@ public class SQLI {
                 System.out.println("Connect to database successfully.");
 
             // sqli vuln code
-            Statement statement = con.createStatement();
-            String sql = "select * from users where username = '" + username + "'";
+            String sql = "select * from users where username = ?";
+            PreparedStatement statement = con.prepareStatement(sql);
+            statement.setString(1, username);
             logger.info(sql);
-            ResultSet rs = statement.executeQuery(sql);
+            ResultSet rs = statement.executeQuery();
 
             while (rs.next()) {
                 String res_name = rs.getString("username");
@@ -146,8 +153,9 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connecting to Database successfully.");
 
-            String sql = "select * from users where username = '" + username + "'";
+            String sql = "select * from users where username = ?";
             PreparedStatement st = con.prepareStatement(sql);
+            st.setString(1, username);
 
             logger.info(st.toString());
             ResultSet rs = st.executeQuery();
@@ -200,7 +208,18 @@ public class SQLI {
      */
     @GetMapping("/mybatis/orderby/vuln03")
     public List<User> mybatisVuln03(@RequestParam("sort") String sort) {
-        return userMapper.findByUserNameVuln03(sort);
+        return userMapper.findByUserNameVuln03(allowedOrderColumn(sort));
+    }
+
+    /**
+     * ORDER BY identifiers cannot be bound as parameters, so only allow known column names.
+     * Returns null (no ORDER BY clause) for anything else.
+     */
+    private static String allowedOrderColumn(String sort) {
+        if (sort != null && ORDER_BY_ALLOWLIST.contains(sort)) {
+            return sort;
+        }
+        return null;
     }
 
 
@@ -239,7 +258,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/orderby/sec04")
     public List<User> mybatisOrderBySec04(@RequestParam("sort") String sort) {
-        return userMapper.findByUserNameVuln03(SecurityUtil.sqlFilter(sort));
+        return userMapper.findByUserNameVuln03(allowedOrderColumn(SecurityUtil.sqlFilter(sort)));
     }
 
 }
