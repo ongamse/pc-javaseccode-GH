@@ -7,10 +7,14 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+import java.security.Principal;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.List;
 
 
@@ -41,6 +45,43 @@ public class SQLI {
 
     @Resource
     private UserMapper userMapper;
+
+    /**
+     * Whether the authenticated caller may read the record owned by ownerUsername:
+     * only the owner themself or an administrator.
+     */
+    private static boolean canAccess(HttpServletRequest request, String ownerUsername) {
+        Principal principal = request.getUserPrincipal();
+        if (principal == null || ownerUsername == null) {
+            return false;
+        }
+        return request.isUserInRole("ADMIN") || principal.getName().equals(ownerUsername);
+    }
+
+    /**
+     * Fail closed (403 via the configured AccessDeniedHandler) when the caller may not read the record.
+     */
+    private static void requireAccess(HttpServletRequest request, String ownerUsername) {
+        if (!canAccess(request, ownerUsername)) {
+            throw new AccessDeniedException("Access denied");
+        }
+    }
+
+    /**
+     * Keep only the records the caller is allowed to read.
+     */
+    private static List<User> filterAccessible(HttpServletRequest request, List<User> users) {
+        List<User> accessible = new ArrayList<>();
+        if (users == null) {
+            return accessible;
+        }
+        for (User u : users) {
+            if (canAccess(request, u.getUsername())) {
+                accessible.add(u);
+            }
+        }
+        return accessible;
+    }
 
 
     /**
@@ -93,7 +134,9 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/sec?username=joychou">http://localhost:8080/sqli/jdbc/sec?username=joychou</a>
      */
     @RequestMapping("/jdbc/sec")
-    public String jdbc_sqli_sec(@RequestParam("username") String username) {
+    public String jdbc_sqli_sec(@RequestParam("username") String username, HttpServletRequest request) {
+
+        requireAccess(request, username);
 
         StringBuilder result = new StringBuilder();
         try {
@@ -181,8 +224,8 @@ public class SQLI {
      * <p>select * from users where username = 'joychou' or '1'='1' </p>
      */
     @GetMapping("/mybatis/vuln01")
-    public List<User> mybatisVuln01(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln01(username);
+    public List<User> mybatisVuln01(@RequestParam("username") String username, HttpServletRequest request) {
+        return filterAccessible(request, userMapper.findByUserNameVuln01(username));
     }
 
     /**
@@ -191,8 +234,8 @@ public class SQLI {
      * <p>select * from users where username like '%joychou' or '1'='1%' </p>
      */
     @GetMapping("/mybatis/vuln02")
-    public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+    public List<User> mybatisVuln02(@RequestParam("username") String username, HttpServletRequest request) {
+        return filterAccessible(request, userMapper.findByUserNameVuln02(username));
     }
 
     /**
@@ -231,7 +274,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec01?username=joychou">http://localhost:8080/sqli/mybatis/sec01?username=joychou</a>
      */
     @GetMapping("/mybatis/sec01")
-    public User mybatisSec01(@RequestParam("username") String username) {
+    public User mybatisSec01(@RequestParam("username") String username, HttpServletRequest request) {
+        requireAccess(request, username);
         return userMapper.findByUserName(username);
     }
 
@@ -240,8 +284,11 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec02?id=1">http://localhost:8080/sqli/mybatis/sec02?id=1</a>
      */
     @GetMapping("/mybatis/sec02")
-    public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+    public User mybatisSec02(@RequestParam("id") Integer id, HttpServletRequest request) {
+        User found = userMapper.findById(id);
+        // Same response whether the id is missing or belongs to someone else (no enumeration).
+        requireAccess(request, found == null ? null : found.getUsername());
+        return found;
     }
 
 
