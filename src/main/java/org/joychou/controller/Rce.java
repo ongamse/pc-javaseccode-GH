@@ -1,5 +1,6 @@
 package org.joychou.controller;
 
+import org.springframework.web.util.HtmlUtils;
 import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
 import org.joychou.security.SecurityUtil;
@@ -63,7 +64,7 @@ public class Rce {
         } catch (Exception e) {
             return e.toString();
         }
-        return sb.toString();
+        return HtmlUtils.htmlEscape(sb.toString());
     }
 
 
@@ -95,7 +96,7 @@ public class Rce {
             return e.toString();
         }
 
-        return sb.toString();
+        return HtmlUtils.htmlEscape(sb.toString());
     }
 
 
