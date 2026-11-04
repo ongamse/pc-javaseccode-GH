@@ -17,7 +17,7 @@ import java.io.IOException;
  * Desc:  xlsx-streamer xxe vuln code
  * Usage: xl/workbook.xml
  * Ref:   https://www.itread01.com/hkpcyyp.html
- * Fix:   update xlsx-streamer to 2.1.0 or above
+ * Fix:   xlsx-streamer updated to 2.1.0 (pom.xml), which disables external entities
  *
  * @author JoyChou @2019-09-05
  */
