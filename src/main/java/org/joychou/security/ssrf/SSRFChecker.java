@@ -1,6 +1,7 @@
 package org.joychou.security.ssrf;
 
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
@@ -65,8 +66,8 @@ public class SSRFChecker {
         String finalUrl = url;
         try {
             do {
-                // 判断当前请求的URL是否是内网ip
-                if (isInternalIpByUrl(finalUrl)) {
+                // 判断当前请求的URL是否是内网ip (http/https only, all resolved addresses must be public)
+                if (isInternalIpByUrl(finalUrl) || !isSafeHttpUrl(finalUrl)) {
                     logger.error("[-] SSRF check failed. Dangerous url: " + finalUrl);
                     return false;  // 内网ip直接return，非内网ip继续判断是否有重定向
                 }
@@ -96,6 +97,82 @@ public class SSRFChecker {
             return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
         }
         return true; // 默认返回true
+    }
+
+
+    /**
+     * Check that an untrusted URL is safe to be requested by the server: the scheme must be
+     * http/https, no user info is allowed, and every address the host resolves to must be
+     * a public address (not loopback, link-local such as the cloud metadata service,
+     * site-local, multicast, unique-local or inside the configured blocked subnets).
+     * Fails closed on any parse or DNS error. Redirects must be disabled (or each hop checked)
+     * by the caller.
+     *
+     * @param url untrusted url
+     * @return true if the url may be requested, false otherwise
+     */
+    public static boolean isSafeHttpUrl(String url) {
+        if (null == url || !SecurityUtil.isHttp(url)) {
+            return false;
+        }
+        try {
+            URI u = new URI(url);
+            if (u.getUserInfo() != null) {
+                return false;
+            }
+            return isSafeHost(u.getHost());
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Illegal url: " + e.getMessage());
+            return false;
+        }
+    }
+
+
+    /**
+     * Check that a host (domain, IPv4 or IPv6 literal) only resolves to public addresses.
+     * Fails closed on any error.
+     *
+     * @param host host to check
+     * @return true if all resolved addresses are public, false otherwise
+     */
+    public static boolean isSafeHost(String host) {
+        if (null == host || host.isEmpty()) {
+            return false;
+        }
+        try {
+            String resolveHost = host;
+            // octal ip such as 012.23.78.233 is parsed differently by InetAddress
+            if (isOctalIP(host)) {
+                resolveHost = decimalIp;
+            }
+            InetAddress[] addresses = InetAddress.getAllByName(resolveHost);
+            if (addresses.length == 0) {
+                return false;
+            }
+            for (InetAddress address : addresses) {
+                if (address.isAnyLocalAddress() || address.isLoopbackAddress()
+                        || address.isLinkLocalAddress() || address.isSiteLocalAddress()
+                        || address.isMulticastAddress()) {
+                    logger.error("[-] SSRF check failed. Internal IP: " + address.getHostAddress());
+                    return false;
+                }
+                if (address instanceof Inet4Address) {
+                    if (isInternalIp(address.getHostAddress())) {
+                        return false;
+                    }
+                } else {
+                    // IPv6 unique local addresses fc00::/7
+                    byte[] raw = address.getAddress();
+                    if ((raw[0] & 0xfe) == 0xfc) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Host can not be resolved: " + e.getMessage());
+            return false;
+        }
     }
 
 

@@ -11,13 +11,24 @@ import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern CMD_ARG_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.=-]+$");
+    private static final Set<String> ALLOWED_COMMANDS = Collections.unmodifiableSet(new HashSet<String>(
+            Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname", "uptime", "ls")));
+    private static final int MAX_CMD_LENGTH = 256;
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -98,6 +109,36 @@ public class SecurityUtil {
             logger.error(e.toString());
             return null;
         }
+    }
+
+
+    /**
+     * Validate a user supplied redirect target (CWE-601).
+     * Allowed: a same-origin relative path (single leading slash, e.g. /a/b?c=d), or an absolute
+     * http/https url whose host passes {@link #checkURL(String)} (safe-domain allowlist).
+     * Rejected: protocol-relative urls (//host), backslashes, control characters, other schemes.
+     *
+     * @param url untrusted redirect target
+     * @return the original url when safe; null otherwise
+     */
+    public static String safeRedirectTarget(String url) {
+        if (url == null || url.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char ch = url.charAt(i);
+            if (ch <= 0x20 || ch == 0x7F || ch == '\\') {
+                return null;
+            }
+        }
+        if (url.charAt(0) == '/') {
+            // "//host" is protocol-relative, "/\host" is treated as "//host" by browsers
+            if (url.length() > 1 && (url.charAt(1) == '/' || url.charAt(1) == '\\')) {
+                return null;
+            }
+            return url;
+        }
+        return checkURL(url);
     }
 
 
@@ -199,8 +240,123 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Resolve an untrusted path against a base directory and make sure the result
+     * stays inside that base directory (including after symlink resolution for
+     * existing files). Absolute paths outside the base and ".." escapes are rejected.
+     *
+     * @param baseDir   directory the result must be confined to
+     * @param untrusted untrusted relative (or absolute-inside-base) path
+     * @return the normalized absolute path inside baseDir, or null if illegal
+     */
+    public static Path resolveInside(Path baseDir, String untrusted) {
+        if (baseDir == null || untrusted == null || untrusted.isEmpty() || untrusted.indexOf('\0') != -1) {
+            return null;
+        }
+        try {
+            Path base = baseDir.toAbsolutePath().normalize();
+            Path resolved = base.resolve(untrusted).normalize();
+            if (!resolved.startsWith(base)) {
+                return null;
+            }
+            if (Files.exists(resolved) && !resolved.toRealPath().startsWith(base.toRealPath())) {
+                return null;
+            }
+            return resolved;
+        } catch (InvalidPathException | IOException e) {
+            logger.info("Illegal path: " + e.toString());
+            return null;
+        }
+    }
+
+
+    /**
+     * Parse an untrusted command line into an argv array for a no-shell spawn.
+     * The program must be in a fixed allowlist and every argument must only contain
+     * <code>a-zA-Z0-9_/.=-</code>. Never pass the result to a shell.
+     *
+     * @param cmd untrusted command line, e.g. "ls -la /tmp"
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] parseAllowedCommand(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String trimmed = cmd.trim();
+        if (trimmed.isEmpty() || trimmed.length() > MAX_CMD_LENGTH) {
+            return null;
+        }
+        String[] argv = trimmed.split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!CMD_ARG_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
+    }
+
+
+    /**
+     * Validate a request Origin header before it is echoed in Access-Control-Allow-Origin (CWE-352).
+     * The value must be a bare http/https origin (scheme://host[:port], no userinfo, path, query or
+     * fragment) whose host passes {@link #checkURL(String)} (safe-domain allowlist).
+     *
+     * @param origin untrusted Origin header value
+     * @return the origin when it is allowed; null otherwise
+     */
+    public static String checkCorsOrigin(String origin) {
+        if (origin == null || origin.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < origin.length(); i++) {
+            char ch = origin.charAt(i);
+            if (ch <= 0x20 || ch >= 0x7F || ch == '\\') {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(origin);
+            String path = uri.getRawPath();
+            if (uri.getRawUserInfo() != null || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null || (path != null && !path.isEmpty())) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return checkURL(origin);
+    }
+
+
+    /**
+     * Remove CR, LF and all other ASCII control characters (except horizontal tab)
+     * from a value before it is written into an HTTP response header, to prevent
+     * HTTP response splitting / header injection (CWE-113).
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if ((ch < 0x20 && ch != '\t') || ch == 0x7F) {
+                continue;
+            }
+            sb.append(ch);
+        }
+        return sb.toString();
+    }
+
+
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 

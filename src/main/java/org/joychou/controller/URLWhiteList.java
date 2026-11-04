@@ -1,5 +1,6 @@
 package org.joychou.controller;
 
+import org.springframework.web.util.HtmlUtils;
 
 import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
@@ -111,7 +112,13 @@ public class URLWhiteList {
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                String target = SecurityUtil.safeRedirectTarget(url);
+                if (target != null) {
+                    res.sendRedirect(target);
+                } else {
+                    res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                }
+                return;
             }
         }
 
@@ -135,9 +142,9 @@ public class URLWhiteList {
 
         for (String whiteHost: whiteDomainlists){
             if (whiteHost.startsWith(".") && host.endsWith(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             } else if (!whiteHost.startsWith(".") && host.equals(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             }
         }
 
