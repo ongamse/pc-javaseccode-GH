@@ -300,6 +300,38 @@ public class SecurityUtil {
 
 
     /**
+     * Validate a request Origin header before it is echoed in Access-Control-Allow-Origin (CWE-352).
+     * The value must be a bare http/https origin (scheme://host[:port], no userinfo, path, query or
+     * fragment) whose host passes {@link #checkURL(String)} (safe-domain allowlist).
+     *
+     * @param origin untrusted Origin header value
+     * @return the origin when it is allowed; null otherwise
+     */
+    public static String checkCorsOrigin(String origin) {
+        if (origin == null || origin.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < origin.length(); i++) {
+            char ch = origin.charAt(i);
+            if (ch <= 0x20 || ch >= 0x7F || ch == '\\') {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(origin);
+            String path = uri.getRawPath();
+            if (uri.getRawUserInfo() != null || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null || (path != null && !path.isEmpty())) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return checkURL(origin);
+    }
+
+
+    /**
      * Remove CR, LF and all other ASCII control characters (except horizontal tab)
      * from a value before it is written into an HTTP response header, to prevent
      * HTTP response splitting / header injection (CWE-113).
