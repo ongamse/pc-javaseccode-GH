@@ -269,6 +269,30 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Remove CR, LF and all other ASCII control characters (except horizontal tab)
+     * from a value before it is written into an HTTP response header, to prevent
+     * HTTP response splitting / header injection (CWE-113).
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if ((ch < 0x20 && ch != '\t') || ch == 0x7F) {
+                continue;
+            }
+            sb.append(ch);
+        }
+        return sb.toString();
+    }
+
+
     public static String cmdFilter(String input) {
         if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
