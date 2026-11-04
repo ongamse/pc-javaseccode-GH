@@ -15,12 +15,20 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern CMD_ARG_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.=-]+$");
+    private static final Set<String> ALLOWED_COMMANDS = Collections.unmodifiableSet(new HashSet<String>(
+            Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname", "uptime", "ls")));
+    private static final int MAX_CMD_LENGTH = 256;
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -232,8 +240,37 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Parse an untrusted command line into an argv array for a no-shell spawn.
+     * The program must be in a fixed allowlist and every argument must only contain
+     * <code>a-zA-Z0-9_/.=-</code>. Never pass the result to a shell.
+     *
+     * @param cmd untrusted command line, e.g. "ls -la /tmp"
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] parseAllowedCommand(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String trimmed = cmd.trim();
+        if (trimmed.isEmpty() || trimmed.length() > MAX_CMD_LENGTH) {
+            return null;
+        }
+        String[] argv = trimmed.split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!CMD_ARG_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
+    }
+
+
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
