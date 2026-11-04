@@ -11,6 +11,9 @@ import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.regex.Pattern;
 
@@ -196,6 +199,36 @@ public class SecurityUtil {
         }
 
         return filepath;
+    }
+
+
+    /**
+     * Resolve an untrusted path against a base directory and make sure the result
+     * stays inside that base directory (including after symlink resolution for
+     * existing files). Absolute paths outside the base and ".." escapes are rejected.
+     *
+     * @param baseDir   directory the result must be confined to
+     * @param untrusted untrusted relative (or absolute-inside-base) path
+     * @return the normalized absolute path inside baseDir, or null if illegal
+     */
+    public static Path resolveInside(Path baseDir, String untrusted) {
+        if (baseDir == null || untrusted == null || untrusted.isEmpty() || untrusted.indexOf('\0') != -1) {
+            return null;
+        }
+        try {
+            Path base = baseDir.toAbsolutePath().normalize();
+            Path resolved = base.resolve(untrusted).normalize();
+            if (!resolved.startsWith(base)) {
+                return null;
+            }
+            if (Files.exists(resolved) && !resolved.toRealPath().startsWith(base.toRealPath())) {
+                return null;
+            }
+            return resolved;
+        } catch (InvalidPathException | IOException e) {
+            logger.info("Illegal path: " + e.toString());
+            return null;
+        }
     }
 
 
