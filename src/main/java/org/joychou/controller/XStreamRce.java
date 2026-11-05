@@ -3,6 +3,9 @@ package org.joychou.controller;
 import com.thoughtworks.xstream.XStream;
 import com.thoughtworks.xstream.io.xml.DomDriver;
 import com.thoughtworks.xstream.io.xml.DomReader;
+import com.thoughtworks.xstream.security.NoTypePermission;
+import com.thoughtworks.xstream.security.NullPermission;
+import com.thoughtworks.xstream.security.PrimitiveTypePermission;
 import org.joychou.dao.User;
 import org.joychou.util.WebUtils;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -37,9 +40,21 @@ public class XStreamRce {
         DocumentBuilder db = dbf.newDocumentBuilder();
         Document document = db.parse(new InputSource(new StringReader(xml)));
 
-        XStream xstream = new XStream(new DomDriver());
+        XStream xstream = newSecureXStream();
         xstream.unmarshal(new DomReader(document.getDocumentElement()));
         return "xstream";
+    }
+
+    /**
+     * XStream with a deny-by-default type allowlist: only primitives, String and User may be unmarshalled.
+     */
+    private static XStream newSecureXStream() {
+        XStream xstream = new XStream(new DomDriver());
+        xstream.addPermission(NoTypePermission.NONE);
+        xstream.addPermission(NullPermission.NULL);
+        xstream.addPermission(PrimitiveTypePermission.PRIMITIVES);
+        xstream.allowTypes(new Class[]{String.class, User.class});
+        return xstream;
     }
 
     public static void main(String[] args) {
@@ -47,7 +62,7 @@ public class XStreamRce {
         user.setId(0);
         user.setUsername("admin");
 
-        XStream xstream = new XStream(new DomDriver());
+        XStream xstream = newSecureXStream();
         String xml = xstream.toXML(user); // Serialize
         System.out.println(xml);
 
