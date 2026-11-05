@@ -1,6 +1,7 @@
 package org.joychou.security.ssrf;
 
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
@@ -71,6 +72,9 @@ public class SSRFChecker {
                     return false;  // 内网ip直接return，非内网ip继续判断是否有重定向
                 }
 
+                if (!SecurityUtil.isHttp(finalUrl)) {
+                    return false;  // only http/https may be requested
+                }
                 connection = (HttpURLConnection) new URL(finalUrl).openConnection();
                 connection.setInstanceFollowRedirects(false);
                 connection.setUseCaches(false); // 设置为false，手动处理跳转，可以拿到每个跳转的URL
@@ -96,6 +100,65 @@ public class SSRFChecker {
             return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
         }
         return true; // 默认返回true
+    }
+
+
+    /**
+     * Check that a host resolves only to public addresses. Every address returned by DNS is checked
+     * (loopback, link-local such as the 169.254.169.254 metadata service, site-local, any-local,
+     * multicast and the configured blocked subnets). Fails closed on any error.
+     *
+     * @param host host name or ip literal
+     * @return true if the host resolves and none of its addresses is internal
+     */
+    public static boolean isPublicHost(String host) {
+        if (host == null || host.isEmpty()) {
+            return false;
+        }
+        try {
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            if (addresses.length == 0) {
+                return false;
+            }
+            for (InetAddress address : addresses) {
+                if (address.isAnyLocalAddress() || address.isLoopbackAddress()
+                        || address.isLinkLocalAddress() || address.isSiteLocalAddress()
+                        || address.isMulticastAddress()) {
+                    logger.error("[-] SSRF check failed. Internal address for host: " + host);
+                    return false;
+                }
+                if (address instanceof Inet4Address && isInternalIp(address.getHostAddress())) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("isPublicHost exception " + e.getMessage());
+            return false;
+        }
+    }
+
+
+    /**
+     * Check that the url is an http/https url whose host resolves only to public addresses.
+     * Redirects are not followed here, so callers must also disable redirects or hook the socket.
+     *
+     * @param url url to check
+     * @return true if safe to request, false otherwise (fails closed)
+     */
+    public static boolean isSafeHttpUrl(String url) {
+        if (url == null || !SecurityUtil.isHttp(url)) {
+            return false;
+        }
+        try {
+            String host = new URI(url).getHost();
+            if (host == null || host.isEmpty()) {
+                return false;
+            }
+            return !isInternalIpByUrl(url) && isPublicHost(host);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
 
@@ -292,7 +355,8 @@ public class SSRFChecker {
             // use URI instead of URL
             URI u = new URI(url);
             if (SecurityUtil.isHttp(url)) {
-                return u.getHost();
+                String host = u.getHost();
+                return host == null ? "" : host;
             }
             return "";
         } catch (Exception e) {

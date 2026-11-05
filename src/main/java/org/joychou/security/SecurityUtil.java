@@ -32,7 +32,11 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
+        if (url == null) {
+            return false;
+        }
+        String lower = url.toLowerCase();
+        return lower.startsWith("http://") || lower.startsWith("https://");
     }
 
 
@@ -45,9 +49,50 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
-        } catch (URISyntaxException e) {
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
+        } catch (URISyntaxException | NullPointerException e) {
             return "";
+        }
+    }
+
+
+    /**
+     * Validate a user supplied JDBC url before it reaches {@link java.sql.DriverManager}.
+     * Only <code>jdbc:&lt;subprotocol&gt;://host[:port]/database</code> with the expected subprotocol is accepted,
+     * the host must resolve only to public addresses, and no connection properties (query string or
+     * <code>;key=value</code> suffix) are allowed because they can load arbitrary classes or files
+     * (for example socketFactory, sslfactory, loggerFile, clientRerouteServerListJNDIName).
+     *
+     * @param jdbcUrl           url to check
+     * @param allowedSubprotocol for example <code>postgresql</code> or <code>db2</code>
+     * @return true if the url is safe to connect to
+     */
+    public static boolean isSafeJdbcUrl(String jdbcUrl, String allowedSubprotocol) {
+        if (jdbcUrl == null || allowedSubprotocol == null) {
+            return false;
+        }
+        String prefix = "jdbc:" + allowedSubprotocol + ":";
+        if (!jdbcUrl.startsWith(prefix)) {
+            return false;
+        }
+        // Reject properties, userinfo, whitespace/control chars and anything outside a conservative charset.
+        if (!Pattern.matches("^[a-zA-Z0-9_.:/\\[\\]-]+$", jdbcUrl)) {
+            return false;
+        }
+        try {
+            URI uri = new URI(jdbcUrl.substring("jdbc:".length()));
+            if (!allowedSubprotocol.equalsIgnoreCase(uri.getScheme())
+                    || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null) {
+                return false;
+            }
+            String host = uri.getHost();
+            if (host == null || host.isEmpty()) {
+                return false;
+            }
+            return SSRFChecker.isPublicHost(host);
+        } catch (URISyntaxException e) {
+            return false;
         }
     }
 
