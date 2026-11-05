@@ -109,10 +109,16 @@ public class URLWhiteList {
         String host = SecurityUtil.gethost(url);
         logger.info("host:  " + host);
 
+        // Project-wide redirect allowlist/blocklist check (also rejects CR/LF).
+        String safeUrl = SecurityUtil.checkURL(url);
+        if (safeUrl == null) {
+            return;
+        }
+
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                res.sendRedirect(safeUrl);
                 return;
             }
         }
