@@ -3,6 +3,9 @@ services:
     jsc:
         image: joychou/jsc:latest
         command: ["java", "-Xdebug", "-Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=0.0.0.0:8000", "-jar", "jsc.jar"]
+        environment:
+            - JSC_DB_PASSWORD=${JSC_DB_PASSWORD}
+            - JSC_ACCESS_KEY_SECRET=${JSC_ACCESS_KEY_SECRET:-}
         ports:
             - "8080:8080"
             - "8000:8000"
