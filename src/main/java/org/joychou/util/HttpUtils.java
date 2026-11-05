@@ -178,9 +178,16 @@ public class HttpUtils {
      */
     public static void imageIO(String url) {
         try {
-            URL u = new URL(url);
-            ImageIO.read(u); // send request
-        } catch (IOException e) {
+            // Only remote http(s) pictures are allowed; file:, jar:, etc. would read local files.
+            URI uri = URI.create(url);
+            String scheme = uri.getScheme();
+            if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))
+                    || uri.getHost() == null) {
+                logger.error("Illegal image url scheme");
+                return;
+            }
+            ImageIO.read(uri.toURL()); // send request
+        } catch (IOException | IllegalArgumentException e) {
             logger.error(e.getMessage());
         }
 
