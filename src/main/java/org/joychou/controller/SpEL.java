@@ -7,6 +7,7 @@ import org.springframework.expression.spel.support.SimpleEvaluationContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 
 
 /**
@@ -29,7 +30,7 @@ public class SpEL {
         // SimpleEvaluationContext blocks type references, constructors and arbitrary method invocation.
         EvaluationContext context = SimpleEvaluationContext.forReadOnlyDataBinding().build();
         Object value = parser.parseExpression(expression).getValue(context);
-        return String.valueOf(value);
+        return HtmlUtils.htmlEscape(String.valueOf(value));
     }
 
     public static void main(String[] args) {

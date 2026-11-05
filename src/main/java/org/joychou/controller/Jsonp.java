@@ -21,6 +21,7 @@ import org.joychou.util.WebUtils;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.security.Principal;
+import java.util.regex.Pattern;
 
 
 /**
@@ -33,7 +34,19 @@ import java.security.Principal;
 @RequestMapping("/jsonp")
 public class Jsonp {
 
+    private static final Pattern CALLBACK_PATTERN = Pattern.compile("^[a-zA-Z_$][a-zA-Z0-9_$.]{0,127}$");
+
     private String callback = WebConfig.getBusinessCallback();
+
+    /**
+     * Wrap json in a callback only when the callback is a plain JavaScript identifier path.
+     */
+    private static String toJsonp(String callback, String json) {
+        if (callback == null || !CALLBACK_PATTERN.matcher(callback).matches()) {
+            return "error";
+        }
+        return WebUtils.json2Jsonp(callback, json);
+    }
 
     @Autowired
     CookieCsrfTokenRepository cookieCsrfTokenRepository;
@@ -45,7 +58,7 @@ public class Jsonp {
     @RequestMapping(value = "/vuln/referer", produces = "application/javascript")
     public String referer(HttpServletRequest request) {
         String callback = request.getParameter(this.callback);
-        return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
+        return toJsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
     /**
@@ -62,7 +75,7 @@ public class Jsonp {
             return "error";
         }
         String callback = request.getParameter(this.callback);
-        return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
+        return toJsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
     /**
@@ -107,7 +120,7 @@ public class Jsonp {
             return "error";
         }
         String callback = request.getParameter(this.callback);
-        return WebUtils.json2Jsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
+        return toJsonp(callback, LoginUtils.getUserInfo2JsonStr(request));
     }
 
     /**
@@ -131,6 +144,9 @@ public class Jsonp {
 
         String callback = request.getParameter("fastjsonpCallback");
         if (StringUtils.isNotBlank(callback)) {
+            if (!CALLBACK_PATTERN.matcher(callback).matches()) {
+                return "error";
+            }
             JSONPObject jsonpObj = new JSONPObject(callback);
             jsonpObj.addParameter(csrfToken);
             return jsonpObj.toString();
