@@ -12,6 +12,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
@@ -200,11 +204,42 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    private static final Set<String> ALLOWED_COMMANDS = Collections.unmodifiableSet(
+            new HashSet<String>(Arrays.asList("whoami", "id", "date", "hostname", "uname", "uptime", "pwd", "ls")));
+
+    /**
+     * Turn a user supplied command line into an argv array without involving a shell.
+     * The executable must be in a fixed allowlist and every argument must match {@link #FILTER_PATTERN}.
+     *
+     * @param cmd user supplied command line, for example <code>ls -la /tmp</code>
+     * @return argv array that is safe to pass to ProcessBuilder, or null if the command is not allowed
+     */
+    public static String[] cmdToAllowedArgv(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String trimmed = cmd.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        String[] argv = trimmed.split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!FILTER_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
     }
 
 
