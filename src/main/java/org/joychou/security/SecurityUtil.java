@@ -12,6 +12,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
@@ -28,7 +32,43 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
+        if (url == null) {
+            return false;
+        }
+        String lower = url.toLowerCase();
+        return lower.startsWith("http://") || lower.startsWith("https://");
+    }
+
+
+    /**
+     * Check whether a value contains CR or LF (HTTP header splitting characters).
+     *
+     * @param value value to check
+     * @return true if value contains CR or LF
+     */
+    public static boolean hasCRLF(String value) {
+        return value != null && (value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0);
+    }
+
+
+    /**
+     * Remove CR, LF and other control characters so the value can be safely placed into an HTTP header.
+     *
+     * @param value untrusted value
+     * @return sanitized value, or null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\t' || (c >= 0x20 && c != 0x7f)) {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
 
@@ -41,9 +81,50 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
-        } catch (URISyntaxException e) {
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
+        } catch (URISyntaxException | NullPointerException e) {
             return "";
+        }
+    }
+
+
+    /**
+     * Validate a user supplied JDBC url before it reaches {@link java.sql.DriverManager}.
+     * Only <code>jdbc:&lt;subprotocol&gt;://host[:port]/database</code> with the expected subprotocol is accepted,
+     * the host must resolve only to public addresses, and no connection properties (query string or
+     * <code>;key=value</code> suffix) are allowed because they can load arbitrary classes or files
+     * (for example socketFactory, sslfactory, loggerFile, clientRerouteServerListJNDIName).
+     *
+     * @param jdbcUrl           url to check
+     * @param allowedSubprotocol for example <code>postgresql</code> or <code>db2</code>
+     * @return true if the url is safe to connect to
+     */
+    public static boolean isSafeJdbcUrl(String jdbcUrl, String allowedSubprotocol) {
+        if (jdbcUrl == null || allowedSubprotocol == null) {
+            return false;
+        }
+        String prefix = "jdbc:" + allowedSubprotocol + ":";
+        if (!jdbcUrl.startsWith(prefix)) {
+            return false;
+        }
+        // Reject properties, userinfo, whitespace/control chars and anything outside a conservative charset.
+        if (!Pattern.matches("^[a-zA-Z0-9_.:/\\[\\]-]+$", jdbcUrl)) {
+            return false;
+        }
+        try {
+            URI uri = new URI(jdbcUrl.substring("jdbc:".length()));
+            if (!allowedSubprotocol.equalsIgnoreCase(uri.getScheme())
+                    || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null) {
+                return false;
+            }
+            String host = uri.getHost();
+            if (host == null || host.isEmpty()) {
+                return false;
+            }
+            return SSRFChecker.isPublicHost(host);
+        } catch (URISyntaxException e) {
+            return false;
         }
     }
 
@@ -57,7 +138,7 @@ public class SecurityUtil {
      */
     public static String checkURL(String url) {
 
-        if (null == url){
+        if (null == url || hasCRLF(url)){
             return null;
         }
 
@@ -200,11 +281,42 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    private static final Set<String> ALLOWED_COMMANDS = Collections.unmodifiableSet(
+            new HashSet<String>(Arrays.asList("whoami", "id", "date", "hostname", "uname", "uptime", "pwd", "ls")));
+
+    /**
+     * Turn a user supplied command line into an argv array without involving a shell.
+     * The executable must be in a fixed allowlist and every argument must match {@link #FILTER_PATTERN}.
+     *
+     * @param cmd user supplied command line, for example <code>ls -la /tmp</code>
+     * @return argv array that is safe to pass to ProcessBuilder, or null if the command is not allowed
+     */
+    public static String[] cmdToAllowedArgv(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String trimmed = cmd.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        String[] argv = trimmed.split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!FILTER_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
     }
 
 

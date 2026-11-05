@@ -53,13 +53,21 @@
             success: function (r) {
                 if (r.code == "0") {
                     // alert(r.message);
-                    if (r.redirectUrl == '') {
-                        location.href = ctx + "index";
-                    } else {
-                        location.href = r.redirectUrl;
+                    var target = ctx + "index";
+                    if (r.redirectUrl) {
+                        try {
+                            // Only follow same-origin http(s) redirects (blocks javascript: and foreign URLs).
+                            var u = new URL(r.redirectUrl, location.href);
+                            if ((u.protocol === "http:" || u.protocol === "https:") && u.origin === location.origin) {
+                                target = u.href;
+                            }
+                        } catch (e) {
+                            // keep default target
+                        }
                     }
+                    location.href = target;
                 } else {
-                    alert(r.message);
+                    alert(String(r.message));
                 }
             }
         });
