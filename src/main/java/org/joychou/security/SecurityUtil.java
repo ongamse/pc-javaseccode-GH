@@ -41,6 +41,38 @@ public class SecurityUtil {
 
 
     /**
+     * Check whether a value contains CR or LF (HTTP header splitting characters).
+     *
+     * @param value value to check
+     * @return true if value contains CR or LF
+     */
+    public static boolean hasCRLF(String value) {
+        return value != null && (value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0);
+    }
+
+
+    /**
+     * Remove CR, LF and other control characters so the value can be safely placed into an HTTP header.
+     *
+     * @param value untrusted value
+     * @return sanitized value, or null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\t' || (c >= 0x20 && c != 0x7f)) {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+
+    /**
      * Get http url host.
      *
      * @param url url
@@ -106,7 +138,7 @@ public class SecurityUtil {
      */
     public static String checkURL(String url) {
 
-        if (null == url){
+        if (null == url || hasCRLF(url)){
             return null;
         }
 
