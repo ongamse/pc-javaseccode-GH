@@ -40,7 +40,7 @@ public class CustomCorsProcessor extends DefaultCorsProcessor {
      */
     private String customCheckOrigin(String requestOrigin) {
 
-        if ( SecurityUtil.checkURL(requestOrigin) != null) {
+        if (SecurityUtil.safeCorsOrigin(requestOrigin) != null) {
             logger.info("[+] Origin: "  + requestOrigin );
             return requestOrigin;
         }

@@ -28,7 +28,7 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
+        return url != null && (url.startsWith("http://") || url.startsWith("https://"));
     }
 
 
@@ -41,10 +41,100 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            // Only http(s) URLs carry a host that is meaningful for outbound requests.
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                return "";
+            }
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
+    }
+
+
+    /**
+     * Whether the url contains characters that browsers and URL parsers treat differently
+     * (backslash, whitespace, control characters). Such urls are used for host-confusion
+     * and header-injection bypasses and are never accepted as redirect targets.
+     *
+     * @param url url
+     * @return true if the url is null or contains a backslash, whitespace or control character
+     */
+    public static boolean hasUnsafeUrlChars(String url) {
+        if (url == null) {
+            return true;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char ch = url.charAt(i);
+            if (ch == '\\' || ch <= 0x20 || (ch >= 0x7f && ch <= 0x9f)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    /**
+     * Validate a redirect destination. Only a same-origin absolute path (<code>/path</code>,
+     * not protocol-relative <code>//host</code>) or an http(s) url whose host is in the
+     * configured safe domains (see {@link #checkURL(String)}) is accepted.
+     *
+     * @param url the untrusted redirect target
+     * @return the original url if it is safe; null otherwise
+     */
+    public static String safeRedirectTarget(String url) {
+        if (hasUnsafeUrlChars(url)) {
+            return null;
+        }
+
+        if (url.startsWith("/")) {
+            if (url.startsWith("//")) {
+                return null;
+            }
+            try {
+                URI uri = new URI(url);
+                if (uri.getScheme() != null || uri.getAuthority() != null) {
+                    return null;
+                }
+                return url;
+            } catch (URISyntaxException e) {
+                return null;
+            }
+        }
+
+        return checkURL(url);
+    }
+
+
+    /**
+     * Validate a request Origin header before it is reflected in Access-Control-Allow-Origin.
+     * The value must be a bare http(s) origin (scheme://host[:port], no userinfo, path, query
+     * or fragment), must not be the literal <code>null</code> origin, and its host must pass
+     * {@link #checkURL(String)} (configured safe domains, block list first).
+     *
+     * @param origin the untrusted Origin request header
+     * @return the origin if it is allowed; null otherwise
+     */
+    public static String safeCorsOrigin(String origin) {
+        if (hasUnsafeUrlChars(origin)) {
+            return null;
+        }
+        try {
+            URI uri = new URI(origin);
+            if (uri.getHost() == null || uri.getRawUserInfo() != null || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null) {
+                return null;
+            }
+            String path = uri.getRawPath();
+            if (path != null && !path.isEmpty()) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return checkURL(origin);
     }
 
 
@@ -196,6 +286,28 @@ public class SecurityUtil {
         }
 
         return filepath;
+    }
+
+
+    /**
+     * Remove CR, LF and all other control characters from an untrusted value
+     * before it is placed in an HTTP response header (prevents CRLF / header injection).
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (ch == '\t' || (ch >= 0x20 && ch != 0x7f && !(ch >= 0x80 && ch <= 0x9f))) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
     }
 
 

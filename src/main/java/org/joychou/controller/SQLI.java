@@ -7,11 +7,13 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import java.sql.*;
 import java.util.List;
+import java.util.regex.Pattern;
 
 
 /**
@@ -39,8 +41,38 @@ public class SQLI {
     @Value("${spring.datasource.password}")
     private String password;
 
+    // Strict format for a username used as a lookup reference.
+    private static final Pattern USERNAME_PATTERN = Pattern.compile("^[A-Za-z0-9_.-]{1,32}$");
+
     @Resource
     private UserMapper userMapper;
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    static class InvalidReferenceException extends RuntimeException {
+        InvalidReferenceException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * Validate that a user supplied username reference matches the allowed format.
+     */
+    private static String validateUsername(String username) {
+        if (username == null || !USERNAME_PATTERN.matcher(username).matches()) {
+            throw new InvalidReferenceException("Invalid username");
+        }
+        return username;
+    }
+
+    /**
+     * Validate that a user supplied id reference is a positive number.
+     */
+    private static Integer validateId(Integer id) {
+        if (id == null || id <= 0) {
+            throw new InvalidReferenceException("Invalid id");
+        }
+        return id;
+    }
 
 
     /**
@@ -61,10 +93,11 @@ public class SQLI {
                 System.out.println("Connect to database successfully.");
 
             // sqli vuln code
-            Statement statement = con.createStatement();
-            String sql = "select * from users where username = '" + username + "'";
-            logger.info(sql);
-            ResultSet rs = statement.executeQuery(sql);
+            String sql = "select * from users where username = ?";
+            PreparedStatement statement = con.prepareStatement(sql);
+            statement.setString(1, username);
+            logger.info(statement.toString());
+            ResultSet rs = statement.executeQuery();
 
             while (rs.next()) {
                 String res_name = rs.getString("username");
@@ -105,7 +138,7 @@ public class SQLI {
             // fix code
             String sql = "select * from users where username = ?";
             PreparedStatement st = con.prepareStatement(sql);
-            st.setString(1, username);
+            st.setString(1, validateUsername(username));
 
             logger.info(st.toString());  // sql after prepare statement
             ResultSet rs = st.executeQuery();
@@ -146,8 +179,9 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connecting to Database successfully.");
 
-            String sql = "select * from users where username = '" + username + "'";
+            String sql = "select * from users where username = ?";
             PreparedStatement st = con.prepareStatement(sql);
+            st.setString(1, username);
 
             logger.info(st.toString());
             ResultSet rs = st.executeQuery();
@@ -180,7 +214,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln01")
     public List<User> mybatisVuln01(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln01(username);
+        return userMapper.findByUserNameVuln01(validateUsername(username));
     }
 
     /**
@@ -190,7 +224,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln02")
     public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+        return userMapper.findByUserNameVuln02(validateUsername(username));
     }
 
     /**
@@ -210,7 +244,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec01")
     public User mybatisSec01(@RequestParam("username") String username) {
-        return userMapper.findByUserName(username);
+        return userMapper.findByUserName(validateUsername(username));
     }
 
     /**
@@ -219,7 +253,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec02")
     public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+        return userMapper.findById(validateId(id));
     }
 
 
