@@ -109,6 +109,36 @@ public class SecurityUtil {
 
 
     /**
+     * Validate a request Origin header before it is reflected in Access-Control-Allow-Origin.
+     * The value must be a bare http(s) origin (scheme://host[:port], no userinfo, path, query
+     * or fragment), must not be the literal <code>null</code> origin, and its host must pass
+     * {@link #checkURL(String)} (configured safe domains, block list first).
+     *
+     * @param origin the untrusted Origin request header
+     * @return the origin if it is allowed; null otherwise
+     */
+    public static String safeCorsOrigin(String origin) {
+        if (hasUnsafeUrlChars(origin)) {
+            return null;
+        }
+        try {
+            URI uri = new URI(origin);
+            if (uri.getHost() == null || uri.getRawUserInfo() != null || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null) {
+                return null;
+            }
+            String path = uri.getRawPath();
+            if (path != null && !path.isEmpty()) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return checkURL(origin);
+    }
+
+
+    /**
      * 同时支持一级域名和多级域名，相关配置在resources目录下url/url_safe_domain.xml文件。
      * 优先判断黑名单，如果满足黑名单return null。
      *
