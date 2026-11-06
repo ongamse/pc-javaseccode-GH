@@ -93,7 +93,8 @@ public class SSRFChecker {
             } while (connection.getResponseCode() != HttpURLConnection.HTTP_OK);
             connection.disconnect();
         } catch (Exception e) {
-            return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
+            logger.error("SSRF check exception: " + e.getMessage());
+            return false;  // Fail closed: if the url can not be verified, it is not safe.
         }
         return true; // 默认返回true
     }
@@ -116,7 +117,21 @@ public class SSRFChecker {
             return true; // 如果域名转换为IP异常，则认为是非法URL
         }
 
-        return isInternalIp(ip);
+        if (isInternalIp(ip)) {
+            return true;
+        }
+
+        // A host can resolve to several addresses; all of them must be public.
+        try {
+            for (InetAddress address : InetAddress.getAllByName(host)) {
+                if (isInternalAddress(address)) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            return true;
+        }
+        return false;
     }
 
 
@@ -130,6 +145,16 @@ public class SSRFChecker {
         if (StringUtils.isEmpty(strIP)) {
             logger.error("[-] SSRF check failed. IP is empty. " + strIP);
             return true;
+        }
+
+        // SubnetUtils only supports IPv4. IPv6 literals are checked by their address properties.
+        if (strIP.indexOf(':') != -1) {
+            try {
+                // An IP literal is parsed without any DNS lookup.
+                return isInternalByProperties(InetAddress.getByName(strIP));
+            } catch (Exception e) {
+                return true;
+            }
         }
 
         ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
@@ -291,13 +316,53 @@ public class SSRFChecker {
         try {
             // use URI instead of URL
             URI u = new URI(url);
-            if (SecurityUtil.isHttp(url)) {
+            // Validate the scheme the URI parser actually sees, not just the raw string prefix.
+            String scheme = u.getScheme();
+            if (("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) && u.getHost() != null) {
                 return u.getHost();
             }
             return "";
         } catch (Exception e) {
             return "";
         }
+    }
+
+
+    /**
+     * Throw if the url is not a public http(s) url. Every address the host resolves to must be
+     * public, otherwise the url is rejected (fail closed).
+     *
+     * @param url url which is about to be requested
+     * @throws SSRFException if the url is illegal or points to an internal address
+     */
+    public static void assertSafeUrl(String url) {
+        if (null == url || isInternalIpByUrl(url)) {
+            throw new SSRFException("[-] SSRF check failed. Illegal or internal url.");
+        }
+    }
+
+
+    /**
+     * Check an address by its properties (loopback, link-local such as the 169.254.169.254 cloud
+     * metadata address, site-local, wildcard, multicast, IPv6 unique local) and by the configured
+     * blocked subnets.
+     */
+    public static boolean isInternalAddress(InetAddress address) {
+        if (isInternalByProperties(address)) {
+            return true;
+        }
+        return address.getAddress().length == 4 && isInternalIp(address.getHostAddress());
+    }
+
+
+    private static boolean isInternalByProperties(InetAddress address) {
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress() || address.isMulticastAddress()) {
+            return true;
+        }
+        byte[] raw = address.getAddress();
+        // IPv6 unique local address fc00::/7
+        return raw.length == 16 && (raw[0] & 0xfe) == 0xfc;
     }
 
 }

@@ -28,7 +28,7 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
+        return url != null && (url.startsWith("http://") || url.startsWith("https://"));
     }
 
 
@@ -41,7 +41,13 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            // Only http(s) URLs carry a host that is meaningful for outbound requests.
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                return "";
+            }
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
