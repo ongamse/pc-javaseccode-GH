@@ -2,6 +2,18 @@ package org.joychou.controller;
 
 import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
+import org.codehaus.groovy.ast.expr.BinaryExpression;
+import org.codehaus.groovy.ast.expr.ConstantExpression;
+import org.codehaus.groovy.ast.expr.Expression;
+import org.codehaus.groovy.ast.stmt.BlockStatement;
+import org.codehaus.groovy.ast.stmt.ExpressionStatement;
+import org.codehaus.groovy.ast.stmt.ReturnStatement;
+import org.codehaus.groovy.ast.stmt.Statement;
+import org.codehaus.groovy.control.CompilerConfiguration;
+import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
+import org.codehaus.groovy.syntax.Types;
+import org.joychou.util.CommandUtil;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -15,7 +27,13 @@ import javax.script.ScriptEngineManager;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.net.URI;
 import java.sql.DriverManager;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 
 
 /**
@@ -28,13 +46,34 @@ import java.sql.DriverManager;
 @RequestMapping("/rce")
 public class Rce {
 
+    private static final int MAX_GROOVY_LENGTH = 256;
+
+    /**
+     * Hosts from which /rce/jscmd may load scripts. Empty by default (feature disabled).
+     */
+    private final Set<String> allowedJsHosts = new HashSet<String>();
+
+    public Rce(@Value("${joychou.rce.js.allowed.hosts:}") String hosts) {
+        for (String h : hosts.split(",")) {
+            String host = h.trim().toLowerCase(Locale.ROOT);
+            if (!host.isEmpty()) {
+                allowedJsHosts.add(host);
+            }
+        }
+    }
+
     @GetMapping("/runtime/exec")
     public String CommandExec(String cmd) {
         Runtime run = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder();
 
+        String[] argv = CommandUtil.toAllowedArgv(cmd);
+        if (argv == null) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            Process p = run.exec(cmd);
+            Process p = run.exec(argv);
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -65,8 +104,12 @@ public class Rce {
 
         StringBuilder sb = new StringBuilder();
 
+        String[] arrCmd = CommandUtil.toAllowedArgv(cmd);
+        if (arrCmd == null) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
             ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
@@ -94,11 +137,19 @@ public class Rce {
      */
     @GetMapping("/jscmd")
     public void jsEngine(String jsurl) throws Exception{
+        // Only https scripts hosted on an operator-configured allowlist may be loaded.
+        URI uri = new URI(jsurl);
+        String host = uri.getHost();
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || host == null || uri.getUserInfo() != null
+                || !allowedJsHosts.contains(host.toLowerCase(Locale.ROOT))) {
+            throw new IllegalArgumentException("jsurl is not allowed");
+        }
         // js nashorn javascript ecmascript
         ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
         Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
-        String cmd = String.format("load(\"%s\")", jsurl);
-        engine.eval(cmd, bindings);
+        // pass the validated URL as a binding value, never concatenated into script source
+        bindings.put("scriptUrl", uri.toASCIIString());
+        engine.eval("load(scriptUrl)", bindings);
     }
 
 
@@ -126,7 +177,29 @@ public class Rce {
      */
     @GetMapping("groovy")
     public void groovyshell(String content) {
-        GroovyShell groovyShell = new GroovyShell();
+        if (content == null || content.length() > MAX_GROOVY_LENGTH) {
+            throw new IllegalArgumentException("content is not allowed");
+        }
+        // Restrict scripts to literal arithmetic: no method calls, property access,
+        // imports, closures or method definitions, so no code execution is possible.
+        SecureASTCustomizer customizer = new SecureASTCustomizer();
+        customizer.setMethodDefinitionAllowed(false);
+        customizer.setClosuresAllowed(false);
+        customizer.setPackageAllowed(false);
+        customizer.setImportsWhitelist(Collections.<String>emptyList());
+        customizer.setStarImportsWhitelist(Collections.<String>emptyList());
+        customizer.setStaticImportsWhitelist(Collections.<String>emptyList());
+        customizer.setStaticStarImportsWhitelist(Collections.<String>emptyList());
+        customizer.setAllowedStatements(Arrays.<Class<? extends Statement>>asList(
+                BlockStatement.class, ExpressionStatement.class, ReturnStatement.class));
+        customizer.setAllowedExpressions(Arrays.<Class<? extends Expression>>asList(
+                ConstantExpression.class, BinaryExpression.class));
+        customizer.setAllowedTokens(Arrays.asList(
+                Types.PLUS, Types.MINUS, Types.MULTIPLY, Types.DIVIDE));
+
+        CompilerConfiguration config = new CompilerConfiguration();
+        config.addCompilationCustomizers(customizer);
+        GroovyShell groovyShell = new GroovyShell(config);
         groovyShell.evaluate(content);
     }
 
