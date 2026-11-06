@@ -55,6 +55,60 @@ public class SecurityUtil {
 
 
     /**
+     * Whether the url contains characters that browsers and URL parsers treat differently
+     * (backslash, whitespace, control characters). Such urls are used for host-confusion
+     * and header-injection bypasses and are never accepted as redirect targets.
+     *
+     * @param url url
+     * @return true if the url is null or contains a backslash, whitespace or control character
+     */
+    public static boolean hasUnsafeUrlChars(String url) {
+        if (url == null) {
+            return true;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char ch = url.charAt(i);
+            if (ch == '\\' || ch <= 0x20 || (ch >= 0x7f && ch <= 0x9f)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    /**
+     * Validate a redirect destination. Only a same-origin absolute path (<code>/path</code>,
+     * not protocol-relative <code>//host</code>) or an http(s) url whose host is in the
+     * configured safe domains (see {@link #checkURL(String)}) is accepted.
+     *
+     * @param url the untrusted redirect target
+     * @return the original url if it is safe; null otherwise
+     */
+    public static String safeRedirectTarget(String url) {
+        if (hasUnsafeUrlChars(url)) {
+            return null;
+        }
+
+        if (url.startsWith("/")) {
+            if (url.startsWith("//")) {
+                return null;
+            }
+            try {
+                URI uri = new URI(url);
+                if (uri.getScheme() != null || uri.getAuthority() != null) {
+                    return null;
+                }
+                return url;
+            } catch (URISyntaxException e) {
+                return null;
+            }
+        }
+
+        return checkURL(url);
+    }
+
+
+    /**
      * 同时支持一级域名和多级域名，相关配置在resources目录下url/url_safe_domain.xml文件。
      * 优先判断黑名单，如果满足黑名单return null。
      *
