@@ -12,12 +12,19 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern CMD_ARG_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.=:-]+$");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "date", "hostname", "uname", "pwd", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -200,11 +207,35 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Parse a user supplied command line into an argv list for a process started WITHOUT a shell.
+     * Only allowlisted executables with plain-character arguments are accepted.
+     *
+     * @param cmd command line, e.g. "ls -la /tmp"
+     * @return argv list, or null if the command is not allowed
+     */
+    public static List<String> safeCommand(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] parts = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(parts[0])) {
+            return null;
+        }
+        for (int i = 1; i < parts.length; i++) {
+            if (!CMD_ARG_PATTERN.matcher(parts[i]).matches()) {
+                return null;
+            }
+        }
+        return new ArrayList<String>(Arrays.asList(parts));
     }
 
 
