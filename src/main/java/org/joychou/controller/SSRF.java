@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.util.HtmlUtils;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletResponse;
@@ -98,9 +99,9 @@ public class SSRF {
     public String request(@RequestParam String url) {
         try {
             SecurityUtil.startSSRFHook();
-            return HttpUtils.request(url);
+            return HtmlUtils.htmlEscape(HttpUtils.request(url));
         } catch (SSRFException | IOException e) {
-            return e.getMessage();
+            return HtmlUtils.htmlEscape(String.valueOf(e.getMessage()));
         } finally {
             SecurityUtil.stopSSRFHook();
         }
@@ -119,15 +120,23 @@ public class SSRF {
     public void openStream(@RequestParam String url, HttpServletResponse response) throws IOException {
         InputStream inputStream = null;
         OutputStream outputStream = null;
+        // Only http/https destinations that do not resolve to internal addresses are allowed.
+        if (!SecurityUtil.isHttp(url) || SecurityUtil.checkSSRFWithoutRedirect(url) == false) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return;
+        }
         try {
             String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
             // download
-            response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
+            response.setHeader("content-disposition", "attachment;fileName=" + SecurityUtil.cleanCRLF(downLoadImgFileName));
 
             URL u = new URL(url);
             int length;
             byte[] bytes = new byte[1024];
-            inputStream = u.openStream(); // send request
+            // do not follow redirects to unvalidated destinations
+            HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            inputStream = conn.getInputStream(); // send request
             outputStream = response.getOutputStream();
             while ((length = inputStream.read(bytes)) > 0) {
                 outputStream.write(bytes, 0, length);
