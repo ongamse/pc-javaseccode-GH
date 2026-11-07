@@ -32,6 +32,7 @@ import org.apache.commons.digester3.Digester;
 import org.jdom2.input.SAXBuilder;
 import org.joychou.util.WebUtils;
 import org.xmlbeam.annotation.XBRead;
+import org.springframework.web.util.HtmlUtils;
 
 /**
  * Java xxe vuln and security code.
@@ -265,11 +266,11 @@ public class XXE {
                     buf.append(String.format("%s: %s\n", node.getNodeName(), node.getTextContent()));
                 }
             }
-            return buf.toString();
+            return HtmlUtils.htmlEscape(buf.toString());
         } catch (Exception e) {
             e.printStackTrace();
             logger.error(e.toString());
-            return e.toString();
+            return HtmlUtils.htmlEscape(e.toString());
         }
     }
 
