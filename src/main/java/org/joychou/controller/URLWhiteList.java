@@ -9,7 +9,6 @@ import org.springframework.web.util.HtmlUtils;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -105,14 +104,15 @@ public class URLWhiteList {
             return;
         }
 
-        URL u = new URL(url);
-        String host = u.getHost();
+        // Strict RFC 3986 parsing (java.net.URI); malformed urls such as backslash tricks yield an empty host.
+        String host = SecurityUtil.gethost(url);
         logger.info("host:  " + host);
 
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
                 res.sendRedirect(url);
+                return;
             }
         }
 

@@ -120,6 +120,11 @@ public class SSRF {
     public void openStream(@RequestParam String url, HttpServletResponse response) throws IOException {
         InputStream inputStream = null;
         OutputStream outputStream = null;
+        // Only http/https destinations that do not resolve to internal addresses are allowed.
+        if (!SecurityUtil.isHttp(url) || SecurityUtil.checkSSRFWithoutRedirect(url) == false) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            return;
+        }
         try {
             String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
             // download
@@ -128,7 +133,10 @@ public class SSRF {
             URL u = new URL(url);
             int length;
             byte[] bytes = new byte[1024];
-            inputStream = u.openStream(); // send request
+            // do not follow redirects to unvalidated destinations
+            HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            inputStream = conn.getInputStream(); // send request
             outputStream = response.getOutputStream();
             while ((length = inputStream.read(bytes)) > 0) {
                 outputStream.write(bytes, 0, length);

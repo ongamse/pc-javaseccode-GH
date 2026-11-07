@@ -46,9 +46,18 @@ public class SecurityUtil {
      * @return host
      */
     public static String gethost(String url) {
+        if (url == null) {
+            return "";
+        }
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            // Only http/https urls have a meaningful host for SSRF decisions.
+            String scheme = uri.getScheme();
+            if (scheme == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+                return "";
+            }
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
