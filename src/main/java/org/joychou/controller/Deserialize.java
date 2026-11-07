@@ -45,15 +45,19 @@ public class Deserialize {
         byte[] decoded = Base64.getDecoder().decode(rememberMe);
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
-        ObjectInputStream in = new ObjectInputStream(bytes);
-        in.readObject();
-        in.close();
+        // Class allowlist enforced in AntObjectInputStream.resolveClass.
+        try (ObjectInputStream in = new AntObjectInputStream(bytes)) {
+            in.readObject();
+        } catch (InvalidClassException e) {
+            logger.info(e.toString());
+            return e.toString();
+        }
 
         return "Are u ok?";
     }
 
     /**
-     * Check deserialize class using black list. <br>
+     * Check deserialize class using allow list. <br>
      * Or update commons-collections to 3.2.2 or above.Serialization support for org.apache.commons.collections.functors.InvokerTransformer is disabled for security reasons.To enable it set system property 'org.apache.commons.collections.enableUnsafeSerialization' to 'true',but you must ensure that your application does not de-serialize objects from untrusted sources.<br>
      * <a href="http://localhost:8080/deserialize/rememberMe/security">http://localhost:8080/deserialize/rememberMe/security</a>
      */
