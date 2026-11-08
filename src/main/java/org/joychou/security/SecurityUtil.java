@@ -267,6 +267,59 @@ public class SecurityUtil {
 
 
     /**
+     * Check that a url is a well-formed absolute http(s) url with a host and without
+     * backslashes or control characters (which browsers normalize differently from
+     * {@link java.net.URL}, enabling host-check bypasses such as http://evil.com\@good.com).
+     *
+     * @param url untrusted url
+     * @return true if the syntax is safe to inspect and redirect to
+     */
+    public static boolean isSafeUrlSyntax(String url) {
+        if (url == null || url.indexOf('\\') >= 0 || !isHttp(url)) {
+            return false;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            if (Character.isISOControl(url.charAt(i))) {
+                return false;
+            }
+        }
+        try {
+            String host = new URI(url).getHost();
+            return host != null && !host.isEmpty();
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
+
+    /**
+     * Validate an untrusted redirect destination. Only a same-site relative path
+     * (single leading slash, no protocol-relative "//", no backslash, no control characters)
+     * or an absolute http(s) url whose host passes {@link #checkURL(String)} is allowed.
+     *
+     * @param url untrusted redirect target
+     * @return the original url if it is a permitted destination, otherwise null (fail closed)
+     */
+    public static String safeRedirectTarget(String url) {
+        if (url == null || url.isEmpty() || url.indexOf('\\') >= 0) {
+            return null;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            if (Character.isISOControl(url.charAt(i))) {
+                return null;
+            }
+        }
+        if (url.startsWith("/")) {
+            return url.startsWith("//") ? null : url;
+        }
+        if (!isSafeUrlSyntax(url)) {
+            return null;
+        }
+        return checkURL(url);
+    }
+
+
+    /**
      * Remove CR, LF and all other ISO control characters from a value that will be written
      * into an HTTP response header, to prevent header injection / response splitting.
      *
