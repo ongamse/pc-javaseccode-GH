@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
@@ -31,6 +33,69 @@ public class SecurityUtil {
      */
     public static boolean isHttp(String url) {
         return url.startsWith("http://") || url.startsWith("https://");
+    }
+
+
+    /**
+     * Validate a user supplied URL before the server requests it (SSRF guard).
+     * The scheme must be http/https, the host must be present, and every address the host
+     * resolves to must be a public address (no loopback, link-local, site-local, wildcard,
+     * multicast or configured blocked subnets such as cloud metadata ranges).
+     * Callers must not follow redirects automatically, otherwise the destination
+     * of a redirect would bypass this check.
+     *
+     * @param url url to be requested
+     * @return true if the url may be requested, otherwise false (fail closed)
+     */
+    public static boolean isSafeOutboundUrl(String url) {
+        if (url == null || !isHttp(url)) {
+            return false;
+        }
+        try {
+            String host = new URI(url).getHost();
+            if (host == null || host.isEmpty()) {
+                return false;
+            }
+            if (SSRFChecker.isInternalIpByUrl(url)) {
+                return false;
+            }
+            return isSafeOutboundHost(host);
+        } catch (Exception e) {
+            logger.error("Illegal outbound url: " + e.getMessage());
+            return false;
+        }
+    }
+
+
+    /**
+     * Resolve the host and make sure all of its addresses are public.
+     *
+     * @param host host name or ip literal
+     * @return true if every resolved address is public, otherwise false (fail closed)
+     */
+    public static boolean isSafeOutboundHost(String host) {
+        if (host == null || host.isEmpty()) {
+            return false;
+        }
+        try {
+            String h = host;
+            if (h.startsWith("[") && h.endsWith("]")) {
+                h = h.substring(1, h.length() - 1);
+            }
+            for (InetAddress addr : InetAddress.getAllByName(h)) {
+                if (addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                        || addr.isSiteLocalAddress() || addr.isMulticastAddress()) {
+                    return false;
+                }
+                if (addr instanceof Inet4Address && SSRFChecker.isInternalIp(addr.getHostAddress())) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("Illegal outbound host: " + e.getMessage());
+            return false;
+        }
     }
 
 
