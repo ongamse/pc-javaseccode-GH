@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
@@ -18,6 +20,8 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final java.util.Set<String> ALLOWED_COMMANDS =
+            new java.util.HashSet<>(java.util.Arrays.asList("whoami", "id", "pwd", "uname", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -29,6 +33,69 @@ public class SecurityUtil {
      */
     public static boolean isHttp(String url) {
         return url.startsWith("http://") || url.startsWith("https://");
+    }
+
+
+    /**
+     * Validate a user supplied URL before the server requests it (SSRF guard).
+     * The scheme must be http/https, the host must be present, and every address the host
+     * resolves to must be a public address (no loopback, link-local, site-local, wildcard,
+     * multicast or configured blocked subnets such as cloud metadata ranges).
+     * Callers must not follow redirects automatically, otherwise the destination
+     * of a redirect would bypass this check.
+     *
+     * @param url url to be requested
+     * @return true if the url may be requested, otherwise false (fail closed)
+     */
+    public static boolean isSafeOutboundUrl(String url) {
+        if (url == null || !isHttp(url)) {
+            return false;
+        }
+        try {
+            String host = new URI(url).getHost();
+            if (host == null || host.isEmpty()) {
+                return false;
+            }
+            if (SSRFChecker.isInternalIpByUrl(url)) {
+                return false;
+            }
+            return isSafeOutboundHost(host);
+        } catch (Exception e) {
+            logger.error("Illegal outbound url: " + e.getMessage());
+            return false;
+        }
+    }
+
+
+    /**
+     * Resolve the host and make sure all of its addresses are public.
+     *
+     * @param host host name or ip literal
+     * @return true if every resolved address is public, otherwise false (fail closed)
+     */
+    public static boolean isSafeOutboundHost(String host) {
+        if (host == null || host.isEmpty()) {
+            return false;
+        }
+        try {
+            String h = host;
+            if (h.startsWith("[") && h.endsWith("]")) {
+                h = h.substring(1, h.length() - 1);
+            }
+            for (InetAddress addr : InetAddress.getAllByName(h)) {
+                if (addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                        || addr.isSiteLocalAddress() || addr.isMulticastAddress()) {
+                    return false;
+                }
+                if (addr instanceof Inet4Address && SSRFChecker.isInternalIp(addr.getHostAddress())) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("Illegal outbound host: " + e.getMessage());
+            return false;
+        }
     }
 
 
@@ -199,12 +266,111 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Check that a url is a well-formed absolute http(s) url with a host and without
+     * backslashes or control characters (which browsers normalize differently from
+     * {@link java.net.URL}, enabling host-check bypasses such as http://evil.com\@good.com).
+     *
+     * @param url untrusted url
+     * @return true if the syntax is safe to inspect and redirect to
+     */
+    public static boolean isSafeUrlSyntax(String url) {
+        if (url == null || url.indexOf('\\') >= 0 || !isHttp(url)) {
+            return false;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            if (Character.isISOControl(url.charAt(i))) {
+                return false;
+            }
+        }
+        try {
+            String host = new URI(url).getHost();
+            return host != null && !host.isEmpty();
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
+
+    /**
+     * Validate an untrusted redirect destination. Only a same-site relative path
+     * (single leading slash, no protocol-relative "//", no backslash, no control characters)
+     * or an absolute http(s) url whose host passes {@link #checkURL(String)} is allowed.
+     *
+     * @param url untrusted redirect target
+     * @return the original url if it is a permitted destination, otherwise null (fail closed)
+     */
+    public static String safeRedirectTarget(String url) {
+        if (url == null || url.isEmpty() || url.indexOf('\\') >= 0) {
+            return null;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            if (Character.isISOControl(url.charAt(i))) {
+                return null;
+            }
+        }
+        if (url.startsWith("/")) {
+            return url.startsWith("//") ? null : url;
+        }
+        if (!isSafeUrlSyntax(url)) {
+            return null;
+        }
+        return checkURL(url);
+    }
+
+
+    /**
+     * Remove CR, LF and all other ISO control characters from a value that will be written
+     * into an HTTP response header, to prevent header injection / response splitting.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters, or null if value is null
+     */
+    public static String cleanCRLF(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Parse a user supplied command line into an argv array for no-shell execution.
+     * The executable must be in a fixed allowlist and every argument must pass {@link #cmdFilter}.
+     *
+     * @param cmd user supplied command line, e.g. "ls -la /tmp"
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] parseAllowedCommand(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (argv.length == 0 || !ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (cmdFilter(argv[i]) == null) {
+                return null;
+            }
+        }
+        return argv;
     }
 
 

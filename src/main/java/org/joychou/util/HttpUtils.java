@@ -5,6 +5,8 @@ import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.HttpResponse;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.fluent.Executor;
 import org.apache.http.client.fluent.Request;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -14,6 +16,7 @@ import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,7 +26,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.URI;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.concurrent.*;
@@ -35,10 +37,43 @@ public class HttpUtils {
 
     private final static Logger logger = LoggerFactory.getLogger(HttpUtils.class);
 
+    private final static String SSRF_CHECK_FAILED = "[-] SSRF check failed";
+
+    /**
+     * Redirects are never followed automatically: the destination of a redirect would
+     * otherwise bypass the outbound url validation.
+     */
+    private static final RequestConfig NO_REDIRECT_CONFIG = RequestConfig.custom().setRedirectsEnabled(false).build();
+
+    /**
+     * Only http/https urls whose host resolves to public addresses may be requested.
+     */
+    private static boolean isForbiddenUrl(String url) {
+        if (SecurityUtil.isSafeOutboundUrl(url)) {
+            return false;
+        }
+        logger.warn(SSRF_CHECK_FAILED);
+        return true;
+    }
+
+    /**
+     * Open a connection to an already validated http/https url without following redirects.
+     */
+    private static HttpURLConnection openNoRedirect(String url) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setInstanceFollowRedirects(false);
+        return conn;
+    }
+
     public static String commonHttpClient(String url) {
+
+        if (isForbiddenUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
 
         HttpClient client = new HttpClient();
         GetMethod method = new GetMethod(url);
+        method.setFollowRedirects(false);
 
         try {
             client.executeMethod(method); // send request
@@ -55,8 +90,12 @@ public class HttpUtils {
 
 
     public static String request(String url) {
+        if (isForbiddenUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         try {
-            return Request.Get(url).execute().returnContent().toString();
+            Executor executor = Executor.newInstance(HttpClients.custom().disableRedirectHandling().build());
+            return executor.execute(Request.Get(url)).returnContent().toString();
         } catch (Exception e) {
             return e.getMessage();
         }
@@ -65,14 +104,18 @@ public class HttpUtils {
 
     public static String httpClient(String url) {
 
+        if (isForbiddenUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
+
         StringBuilder result = new StringBuilder();
 
         try {
 
             CloseableHttpClient client = HttpClients.createDefault();
             HttpGet httpGet = new HttpGet(url);
-            // set redirect enable false
-            // httpGet.setConfig(RequestConfig.custom().setRedirectsEnabled(false).build());
+            // redirects are disabled so that the validated url cannot be bypassed
+            httpGet.setConfig(NO_REDIRECT_CONFIG);
             HttpResponse httpResponse = client.execute(httpGet); // send request
             BufferedReader rd = new BufferedReader(new InputStreamReader(httpResponse.getEntity().getContent()));
 
@@ -90,9 +133,11 @@ public class HttpUtils {
 
 
     public static String URLConnection(String url) {
+        if (isForbiddenUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         try {
-            URL u = new URL(url);
-            URLConnection urlConnection = u.openConnection();
+            URLConnection urlConnection = openNoRedirect(url);
             BufferedReader in = new BufferedReader(new InputStreamReader(urlConnection.getInputStream())); //send request
             String inputLine;
             StringBuilder html = new StringBuilder();
@@ -114,11 +159,11 @@ public class HttpUtils {
      * UserAgent is Java/1.8.0_102.
      */
     public static String HttpURLConnection(String url) {
+        if (isForbiddenUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         try {
-            URL u = new URL(url);
-            URLConnection urlConnection = u.openConnection();
-            HttpURLConnection conn = (HttpURLConnection) urlConnection;
-//             conn.setInstanceFollowRedirects(false);
+            HttpURLConnection conn = openNoRedirect(url);
 //             Many HttpURLConnection methods can send http request, such as getResponseCode, getHeaderField
             InputStream is = conn.getInputStream();  // send request
             BufferedReader in = new BufferedReader(new InputStreamReader(is));
@@ -143,9 +188,12 @@ public class HttpUtils {
      * @param url http request url
      */
     public static String Jsoup(String url) {
+        if (isForbiddenUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         try {
             Document doc = Jsoup.connect(url)
-//                    .followRedirects(false)
+                    .followRedirects(false)
                     .timeout(3000)
                     .cookie("name", "joychou") // request cookies
                     .execute().parse();
@@ -162,8 +210,12 @@ public class HttpUtils {
      * UserAgent is <code>okhttp/2.5.0</code>.
      */
     public static String okhttp(String url) throws IOException {
+        if (isForbiddenUrl(url)) {
+            throw new IOException(SSRF_CHECK_FAILED);
+        }
         OkHttpClient client = new OkHttpClient();
-//         client.setFollowRedirects(false);
+        client.setFollowRedirects(false);
+        client.setFollowSslRedirects(false);
         com.squareup.okhttp.Request ok_http = new com.squareup.okhttp.Request.Builder().url(url).build();
         return client.newCall(ok_http).execute().body().string();
     }
@@ -177,9 +229,14 @@ public class HttpUtils {
      * @param url http request url
      */
     public static void imageIO(String url) {
+        if (isForbiddenUrl(url)) {
+            return;
+        }
         try {
-            URL u = new URL(url);
-            ImageIO.read(u); // send request
+            HttpURLConnection conn = openNoRedirect(url);
+            try (InputStream is = conn.getInputStream()) { // send request
+                ImageIO.read(is);
+            }
         } catch (IOException e) {
             logger.error(e.getMessage());
         }
@@ -194,8 +251,14 @@ public class HttpUtils {
      * @param url http request url
      */
     public static void IOUtils(String url) {
+        if (isForbiddenUrl(url)) {
+            return;
+        }
         try {
-            IOUtils.toByteArray(URI.create(url));
+            HttpURLConnection conn = openNoRedirect(url);
+            try (InputStream is = conn.getInputStream()) { // send request
+                IOUtils.toByteArray(is);
+            }
         } catch (IOException e) {
             logger.error(e.getMessage());
         }
@@ -203,10 +266,14 @@ public class HttpUtils {
 
 
     public static String HttpAsyncClients(String url) {
+        if (isForbiddenUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         CloseableHttpAsyncClient httpclient = HttpAsyncClients.createDefault();
         try {
             httpclient.start();
             final HttpGet request = new HttpGet(url);
+            request.setConfig(NO_REDIRECT_CONFIG);
             Future<HttpResponse> future = httpclient.execute(request, null);
             HttpResponse response = future.get(6000, TimeUnit.MILLISECONDS);
             return EntityUtils.toString(response.getEntity());
