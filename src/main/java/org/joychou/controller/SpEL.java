@@ -13,6 +13,7 @@ import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 
 import java.util.Collections;
 
@@ -36,7 +37,7 @@ public class SpEL {
         ExpressionParser parser = new SpelExpressionParser();
         // SimpleEvaluationContext is unavailable on the Spring 4.3.6 baseline, so lock down a
         // StandardEvaluationContext: no type references (T(..), new x.Y()), no method or constructor calls.
-        return String.valueOf(parser.parseExpression(expression).getValue(restrictedContext()));
+        return HtmlUtils.htmlEscape(String.valueOf(parser.parseExpression(expression).getValue(restrictedContext())));
     }
 
     private static EvaluationContext restrictedContext() {
