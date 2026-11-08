@@ -266,6 +266,28 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Remove CR, LF and all other ISO control characters from a value that will be written
+     * into an HTTP response header, to prevent header injection / response splitting.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters, or null if value is null
+     */
+    public static String cleanCRLF(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+
     public static String cmdFilter(String input) {
         if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
