@@ -32,16 +32,38 @@ public class IPForge {
     @RequestMapping("/proxy")
     @ResponseBody
     public static String proxy(HttpServletRequest request) {
-        String ip = request.getHeader("X-Real-IP");
-        if (StringUtils.isNotBlank(ip)) {
-            return HtmlUtils.htmlEscape(ip);
-        } else {
-            String remoteAddr = request.getRemoteAddr();
-            if (StringUtils.isNotBlank(remoteAddr)) {
-                return HtmlUtils.htmlEscape(remoteAddr);
+        String remoteAddr = request.getRemoteAddr();
+        // Only honour X-Real-IP when the direct peer is a configured trusted proxy.
+        if (isTrustedProxy(remoteAddr)) {
+            String ip = request.getHeader("X-Real-IP");
+            if (StringUtils.isNotBlank(ip)) {
+                return HtmlUtils.htmlEscape(ip.trim());
             }
         }
+        if (StringUtils.isNotBlank(remoteAddr)) {
+            return HtmlUtils.htmlEscape(remoteAddr);
+        }
         return "";
+    }
+
+    /**
+     * Trusted proxy allowlist, comma separated, from the TRUSTED_PROXIES env var
+     * or the trusted.proxies system property. Defaults to loopback only.
+     */
+    private static boolean isTrustedProxy(String remoteAddr) {
+        if (StringUtils.isBlank(remoteAddr)) {
+            return false;
+        }
+        String configured = System.getProperty("trusted.proxies", System.getenv("TRUSTED_PROXIES"));
+        if (StringUtils.isBlank(configured)) {
+            configured = "127.0.0.1,0:0:0:0:0:0:0:1,::1";
+        }
+        for (String proxy : configured.split(",")) {
+            if (remoteAddr.equals(proxy.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 
 
