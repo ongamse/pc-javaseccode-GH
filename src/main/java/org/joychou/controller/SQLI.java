@@ -7,10 +7,13 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.List;
 
 
@@ -41,6 +44,31 @@ public class SQLI {
 
     @Resource
     private UserMapper userMapper;
+
+    /**
+     * Thrown when the logged-in user references a user record that is not theirs.
+     */
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    private static class ForbiddenReferenceException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+    }
+
+    /**
+     * Object-level authorization: a user may only reference their own record, unless they have the ADMIN role.
+     * Fails closed when there is no authenticated principal.
+     */
+    private static boolean canAccessUser(HttpServletRequest request, String targetUsername) {
+        if (request.getUserPrincipal() == null || targetUsername == null) {
+            return false;
+        }
+        return request.isUserInRole("ADMIN") || targetUsername.equals(request.getUserPrincipal().getName());
+    }
+
+    private static void checkAccessUser(HttpServletRequest request, String targetUsername) {
+        if (!canAccessUser(request, targetUsername)) {
+            throw new ForbiddenReferenceException();
+        }
+    }
 
 
     /**
@@ -93,7 +121,9 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/sec?username=joychou">http://localhost:8080/sqli/jdbc/sec?username=joychou</a>
      */
     @RequestMapping("/jdbc/sec")
-    public String jdbc_sqli_sec(@RequestParam("username") String username) {
+    public String jdbc_sqli_sec(@RequestParam("username") String username, HttpServletRequest request) {
+
+        checkAccessUser(request, username);
 
         StringBuilder result = new StringBuilder();
         try {
@@ -181,7 +211,8 @@ public class SQLI {
      * <p>select * from users where username = 'joychou' or '1'='1' </p>
      */
     @GetMapping("/mybatis/vuln01")
-    public List<User> mybatisVuln01(@RequestParam("username") String username) {
+    public List<User> mybatisVuln01(@RequestParam("username") String username, HttpServletRequest request) {
+        checkAccessUser(request, username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -191,8 +222,15 @@ public class SQLI {
      * <p>select * from users where username like '%joychou' or '1'='1%' </p>
      */
     @GetMapping("/mybatis/vuln02")
-    public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+    public List<User> mybatisVuln02(@RequestParam("username") String username, HttpServletRequest request) {
+        // Fuzzy search: only return records the caller is allowed to reference.
+        List<User> visible = new ArrayList<>();
+        for (User u : userMapper.findByUserNameVuln02(username)) {
+            if (canAccessUser(request, u.getUsername())) {
+                visible.add(u);
+            }
+        }
+        return visible;
     }
 
     /**
@@ -211,7 +249,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec01?username=joychou">http://localhost:8080/sqli/mybatis/sec01?username=joychou</a>
      */
     @GetMapping("/mybatis/sec01")
-    public User mybatisSec01(@RequestParam("username") String username) {
+    public User mybatisSec01(@RequestParam("username") String username, HttpServletRequest request) {
+        checkAccessUser(request, username);
         return userMapper.findByUserName(username);
     }
 
@@ -220,8 +259,13 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec02?id=1">http://localhost:8080/sqli/mybatis/sec02?id=1</a>
      */
     @GetMapping("/mybatis/sec02")
-    public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+    public User mybatisSec02(@RequestParam("id") Integer id, HttpServletRequest request) {
+        User found = userMapper.findById(id);
+        if (found != null) {
+            // Ownership check on the referenced record (admins may read any record).
+            checkAccessUser(request, found.getUsername());
+        }
+        return found;
     }
 
 
