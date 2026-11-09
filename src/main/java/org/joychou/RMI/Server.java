@@ -15,6 +15,9 @@ public class Server implements Hello {
     public static void main(String args[]) {
 
         try {
+            // Reject deserialization of anything but the types a registry legitimately receives.
+            System.setProperty("sun.rmi.registry.registryFilter",
+                    "java.lang.String;java.rmi.Remote;java.lang.reflect.Proxy;java.rmi.server.*;org.joychou.RMI.Hello;!*");
             Server obj = new Server();
             Hello stub = (Hello) UnicastRemoteObject.exportObject(obj, 0);
             LocateRegistry.createRegistry(1099);
