@@ -112,7 +112,14 @@ public class URLWhiteList {
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                // The suffix check above is bypassable; also require the project's safe-domain check.
+                String safeUrl = SecurityUtil.checkURL(url);
+                if (safeUrl == null) {
+                    res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    return;
+                }
+                res.sendRedirect(SecurityUtil.stripCRLF(safeUrl));
+                return;
             }
         }
 
