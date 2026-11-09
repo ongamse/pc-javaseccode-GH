@@ -12,6 +12,7 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
 import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
+import org.joychou.security.SecurityUtil;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.slf4j.Logger;
@@ -35,12 +36,26 @@ public class HttpUtils {
 
     private final static Logger logger = LoggerFactory.getLogger(HttpUtils.class);
 
+    /**
+     * Validate an untrusted url before any outbound request: only http/https and the
+     * resolved host must not be a private, loopback or link-local address.
+     *
+     * @throws IOException if the url is not allowed
+     */
+    private static void checkUrl(String url) throws IOException {
+        if (url == null || !SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            throw new IOException("Illegal url");
+        }
+    }
+
     public static String commonHttpClient(String url) {
 
         HttpClient client = new HttpClient();
-        GetMethod method = new GetMethod(url);
+        GetMethod method = null;
 
         try {
+            checkUrl(url);
+            method = new GetMethod(url);
             client.executeMethod(method); // send request
             byte[] resBody = method.getResponseBody();
             return new String(resBody);
@@ -49,13 +64,16 @@ public class HttpUtils {
             return "Error: " + e.getMessage();
         } finally {
             // Release the connection.
-            method.releaseConnection();
+            if (method != null) {
+                method.releaseConnection();
+            }
         }
     }
 
 
     public static String request(String url) {
         try {
+            checkUrl(url);
             return Request.Get(url).execute().returnContent().toString();
         } catch (Exception e) {
             return e.getMessage();
@@ -69,6 +87,7 @@ public class HttpUtils {
 
         try {
 
+            checkUrl(url);
             CloseableHttpClient client = HttpClients.createDefault();
             HttpGet httpGet = new HttpGet(url);
             // set redirect enable false
@@ -91,6 +110,7 @@ public class HttpUtils {
 
     public static String URLConnection(String url) {
         try {
+            checkUrl(url);
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
             BufferedReader in = new BufferedReader(new InputStreamReader(urlConnection.getInputStream())); //send request
@@ -115,6 +135,7 @@ public class HttpUtils {
      */
     public static String HttpURLConnection(String url) {
         try {
+            checkUrl(url);
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
             HttpURLConnection conn = (HttpURLConnection) urlConnection;
@@ -144,6 +165,7 @@ public class HttpUtils {
      */
     public static String Jsoup(String url) {
         try {
+            checkUrl(url);
             Document doc = Jsoup.connect(url)
 //                    .followRedirects(false)
                     .timeout(3000)
@@ -162,6 +184,7 @@ public class HttpUtils {
      * UserAgent is <code>okhttp/2.5.0</code>.
      */
     public static String okhttp(String url) throws IOException {
+        checkUrl(url);
         OkHttpClient client = new OkHttpClient();
 //         client.setFollowRedirects(false);
         com.squareup.okhttp.Request ok_http = new com.squareup.okhttp.Request.Builder().url(url).build();
@@ -178,6 +201,7 @@ public class HttpUtils {
      */
     public static void imageIO(String url) {
         try {
+            checkUrl(url);
             URL u = new URL(url);
             // Only remote http(s) pictures; reject file:, jar:, etc. which would read local paths.
             String protocol = u.getProtocol();
@@ -201,6 +225,7 @@ public class HttpUtils {
      */
     public static void IOUtils(String url) {
         try {
+            checkUrl(url);
             IOUtils.toByteArray(URI.create(url));
         } catch (IOException e) {
             logger.error(e.getMessage());
@@ -211,6 +236,7 @@ public class HttpUtils {
     public static String HttpAsyncClients(String url) {
         CloseableHttpAsyncClient httpclient = HttpAsyncClients.createDefault();
         try {
+            checkUrl(url);
             httpclient.start();
             final HttpGet request = new HttpGet(url);
             Future<HttpResponse> future = httpclient.execute(request, null);

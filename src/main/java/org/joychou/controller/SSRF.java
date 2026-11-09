@@ -121,6 +121,10 @@ public class SSRF {
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {
+            if (!SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
+                logger.error("Illegal url");
+                return;
+            }
             String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
             // download
             response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
