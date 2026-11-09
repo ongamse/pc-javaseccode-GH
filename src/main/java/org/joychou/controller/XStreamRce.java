@@ -1,6 +1,7 @@
 package org.joychou.controller;
 
 import com.thoughtworks.xstream.XStream;
+import com.thoughtworks.xstream.io.StreamException;
 import com.thoughtworks.xstream.io.xml.DomDriver;
 import org.joychou.dao.User;
 import org.joychou.util.WebUtils;
@@ -8,6 +9,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 
 
 @RestController
@@ -23,9 +26,27 @@ public class XStreamRce {
     @PostMapping("/xstream")
     public String parseXml(HttpServletRequest request) throws Exception {
         String xml = WebUtils.getRequestBody(request);
-        XStream xstream = new XStream(new DomDriver());
+        XStream xstream = new XStream(new SecureDomDriver());
         xstream.fromXML(xml);
         return "xstream";
+    }
+
+    /**
+     * DomDriver whose DocumentBuilderFactory forbids DOCTYPE declarations and external entities (XXE).
+     */
+    private static class SecureDomDriver extends DomDriver {
+        @Override
+        protected DocumentBuilderFactory createDocumentBuilderFactory() {
+            DocumentBuilderFactory factory = super.createDocumentBuilderFactory();
+            try {
+                factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+                factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            } catch (ParserConfigurationException e) {
+                throw new StreamException(e);
+            }
+            return factory;
+        }
     }
 
     public static void main(String[] args) {
