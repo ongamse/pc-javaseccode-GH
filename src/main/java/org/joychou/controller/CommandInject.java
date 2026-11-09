@@ -9,9 +9,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
 import java.io.IOException;
+import java.util.regex.Pattern;
 
 @RestController
 public class CommandInject {
+
+    private static final Pattern HOST_PATTERN = Pattern.compile("^[A-Za-z0-9.-]+(:[0-9]{1,5})?$");
 
     protected final Logger logger = LoggerFactory.getLogger(this.getClass());
 
@@ -24,7 +27,11 @@ public class CommandInject {
     @GetMapping("/codeinject")
     public String codeInject(String filepath) throws IOException {
 
-        String[] cmdList = new String[]{"sh", "-c", "ls -la " + filepath};
+        // No shell: filepath is a single argv element and cannot inject commands
+        if (null == SecurityUtil.cmdFilter(filepath)) {
+            return "Bad boy. I got u.";
+        }
+        String[] cmdList = new String[]{"ls", "-la", "--", filepath};
         ProcessBuilder builder = new ProcessBuilder(cmdList);
         builder.redirectErrorStream(true);
         Process process = builder.start();
@@ -41,7 +48,11 @@ public class CommandInject {
 
         String host = request.getHeader("host");
         logger.info(host);
-        String[] cmdList = new String[]{"sh", "-c", "curl " + host};
+        // No shell, and the Host header must be a plain host[:port] value
+        if (host == null || !HOST_PATTERN.matcher(host).matches()) {
+            return "Bad boy. I got u.";
+        }
+        String[] cmdList = new String[]{"curl", "--", host};
         ProcessBuilder builder = new ProcessBuilder(cmdList);
         builder.redirectErrorStream(true);
         Process process = builder.start();
@@ -54,7 +65,7 @@ public class CommandInject {
         if (null == filterFilePath) {
             return "Bad boy. I got u.";
         }
-        String[] cmdList = new String[]{"sh", "-c", "ls -la " + filterFilePath};
+        String[] cmdList = new String[]{"ls", "-la", "--", filterFilePath};
         ProcessBuilder builder = new ProcessBuilder(cmdList);
         builder.redirectErrorStream(true);
         Process process = builder.start();

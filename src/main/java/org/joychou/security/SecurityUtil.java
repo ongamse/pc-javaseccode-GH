@@ -18,6 +18,8 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final java.util.Set<String> ALLOWED_COMMANDS = new java.util.HashSet<>(
+            java.util.Arrays.asList("whoami", "id", "date", "hostname", "uname", "pwd", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -205,6 +207,31 @@ public class SecurityUtil {
         }
 
         return input;
+    }
+
+
+    /**
+     * Build a shell-free argv from untrusted input. The executable must be in a fixed allowlist
+     * and every argument must pass {@link #cmdFilter(String)}. The result is meant for
+     * {@link ProcessBuilder}/{@link Runtime#exec(String[])} without a shell.
+     *
+     * @param input command line, split on whitespace
+     * @return argv, or null if the command is not allowed
+     */
+    public static String[] cmdArgv(String input) {
+        if (null == input || input.trim().isEmpty()) {
+            return null;
+        }
+        String[] parts = input.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(parts[0])) {
+            return null;
+        }
+        for (int i = 1; i < parts.length; i++) {
+            if (null == cmdFilter(parts[i])) {
+                return null;
+            }
+        }
+        return parts;
     }
 
 
