@@ -1,6 +1,7 @@
 package org.joychou.security.ssrf;
 
 import java.net.HttpURLConnection;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
@@ -66,7 +67,7 @@ public class SSRFChecker {
         try {
             do {
                 // 判断当前请求的URL是否是内网ip
-                if (isInternalIpByUrl(finalUrl)) {
+                if (!isSafeUrl(finalUrl)) {
                     logger.error("[-] SSRF check failed. Dangerous url: " + finalUrl);
                     return false;  // 内网ip直接return，非内网ip继续判断是否有重定向
                 }
@@ -96,6 +97,80 @@ public class SSRFChecker {
             return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
         }
         return true; // 默认返回true
+    }
+
+
+    /**
+     * Check whether a user supplied URL is safe to request from the server side.
+     * The scheme must be http or https, the host must be present, and every address the host
+     * resolves to must not be a loopback, link-local (including cloud metadata 169.254.169.254),
+     * site-local/private, unique-local, multicast, wildcard or configured internal address.
+     * Callers must also disable redirect following (or re-check every hop).
+     *
+     * @param url the url to check
+     * @return true if the url is safe to request, otherwise false (fail closed)
+     */
+    public static boolean isSafeUrl(String url) {
+        if (null == url) {
+            return false;
+        }
+        try {
+            URI u = new URI(url);
+            String scheme = u.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                return false;
+            }
+            String host = u.getHost();
+            if (null == host || host.isEmpty()) {
+                return false;
+            }
+            return isSafeHost(host);
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Illegal url: " + e.getMessage());
+            return false;
+        }
+    }
+
+
+    /**
+     * Resolve the host and check that none of its addresses is internal.
+     *
+     * @param host host name or ip literal
+     * @return true if every resolved address is public, otherwise false (fail closed)
+     */
+    public static boolean isSafeHost(String host) {
+        if (null == host || host.isEmpty()) {
+            return false;
+        }
+        try {
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            if (addresses.length == 0) {
+                return false;
+            }
+            for (InetAddress address : addresses) {
+                if (isBlockedAddress(address)) {
+                    logger.error("[-] SSRF check failed. Blocked address: " + address.getHostAddress());
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Illegal host: " + e.getMessage());
+            return false;
+        }
+    }
+
+
+    private static boolean isBlockedAddress(InetAddress address) {
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress() || address.isMulticastAddress()) {
+            return true;
+        }
+        if (address instanceof Inet6Address) {
+            // fc00::/7 unique local addresses
+            return (address.getAddress()[0] & 0xfe) == 0xfc;
+        }
+        return isInternalIp(address.getHostAddress());
     }
 
 
@@ -289,12 +364,13 @@ public class SSRFChecker {
      */
     private static String url2host(String url) {
         try {
-            // use URI instead of URL
-            URI u = new URI(url);
-            if (SecurityUtil.isHttp(url)) {
-                return u.getHost();
+            // Reject non http(s) schemes before parsing; use URI instead of URL
+            if (null == url || !SecurityUtil.isHttp(url)) {
+                return "";
             }
-            return "";
+            URI u = new URI(url);
+            String host = u.getHost();
+            return null == host ? "" : host;
         } catch (Exception e) {
             return "";
         }

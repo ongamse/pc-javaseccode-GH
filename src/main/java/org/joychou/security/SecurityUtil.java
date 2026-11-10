@@ -40,8 +40,12 @@ public class SecurityUtil {
      */
     public static String gethost(String url) {
         try {
+            if (null == url || !isHttp(url)) {
+                return "";
+            }
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            return null == host ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
