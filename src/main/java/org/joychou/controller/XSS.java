@@ -27,7 +27,7 @@ public class XSS {
     @RequestMapping("/reflect")
     @ResponseBody
     public static String reflect(String xss) {
-        return xss;
+        return encode(xss);
     }
 
     /**
@@ -55,7 +55,7 @@ public class XSS {
     @RequestMapping("/stored/show")
     @ResponseBody
     public String show(@CookieValue("xss") String xss) {
-        return xss;
+        return encode(xss);
     }
 
     /**
@@ -69,6 +69,9 @@ public class XSS {
     }
 
     private static String encode(String origin) {
+        if (origin == null) {
+            return null;
+        }
         origin = StringUtils.replace(origin, "&", "&amp;");
         origin = StringUtils.replace(origin, "<", "&lt;");
         origin = StringUtils.replace(origin, ">", "&gt;");
