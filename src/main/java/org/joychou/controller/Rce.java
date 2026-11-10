@@ -1,21 +1,24 @@
 package org.joychou.controller;
 
-import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
+import org.joychou.security.SecurityUtil;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
-import javax.script.Bindings;
-import javax.script.ScriptContext;
-import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.sql.DriverManager;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 
 /**
@@ -28,13 +31,47 @@ import java.sql.DriverManager;
 @RequestMapping("/rce")
 public class Rce {
 
+    /** Only these executables may be run through the command endpoints. */
+    private static final Set<String> ALLOWED_COMMANDS =
+            new HashSet<>(Arrays.asList("whoami", "id", "date", "pwd", "uname", "hostname"));
+
+    /**
+     * Split a user supplied command line into an argv list without involving a shell.
+     * The executable must be in the allowlist and every argument must pass
+     * {@link SecurityUtil#cmdFilter(String)}.
+     *
+     * @return argv list, or null when the command is not permitted
+     */
+    private static List<String> toSafeArgv(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] tokens = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(tokens[0])) {
+            return null;
+        }
+        List<String> argv = new ArrayList<>();
+        argv.add(tokens[0]);
+        for (int i = 1; i < tokens.length; i++) {
+            if (SecurityUtil.cmdFilter(tokens[i]) == null) {
+                return null;
+            }
+            argv.add(tokens[i]);
+        }
+        return argv;
+    }
+
     @GetMapping("/runtime/exec")
     public String CommandExec(String cmd) {
-        Runtime run = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder();
 
+        List<String> argv = toSafeArgv(cmd);
+        if (argv == null) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            Process p = run.exec(cmd);
+            Process p = new ProcessBuilder(argv).start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -65,9 +102,13 @@ public class Rce {
 
         StringBuilder sb = new StringBuilder();
 
+        List<String> argv = toSafeArgv(cmd);
+        if (argv == null) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
-            ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
+            ProcessBuilder processBuilder = new ProcessBuilder(argv);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
@@ -93,12 +134,10 @@ public class Rce {
      * @param jsurl js url
      */
     @GetMapping("/jscmd")
-    public void jsEngine(String jsurl) throws Exception{
-        // js nashorn javascript ecmascript
-        ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
-        Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
-        String cmd = String.format("load(\"%s\")", jsurl);
-        engine.eval(cmd, bindings);
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public String jsEngine(String jsurl) {
+        // Loading and evaluating a remote script is arbitrary code execution; it is disabled.
+        return "Remote script evaluation is disabled.";
     }
 
 
@@ -125,9 +164,10 @@ public class Rce {
      * @param content groovy shell
      */
     @GetMapping("groovy")
-    public void groovyshell(String content) {
-        GroovyShell groovyShell = new GroovyShell();
-        groovyShell.evaluate(content);
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public String groovyshell(String content) {
+        // Evaluating request supplied Groovy is arbitrary code execution; it is disabled.
+        return "Groovy evaluation is disabled.";
     }
 
 
