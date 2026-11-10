@@ -7,11 +7,15 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+import java.security.Principal;
 import java.sql.*;
 import java.util.List;
+import java.util.regex.Pattern;
 
 
 /**
@@ -41,6 +45,51 @@ public class SQLI {
 
     @Resource
     private UserMapper userMapper;
+
+    private static final Pattern USERNAME_PATTERN = Pattern.compile("^[A-Za-z0-9_.@-]{1,64}$");
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    static class InvalidReferenceException extends RuntimeException {
+        InvalidReferenceException(String message) {
+            super(message);
+        }
+    }
+
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    static class ForbiddenReferenceException extends RuntimeException {
+        ForbiddenReferenceException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * Validate a client-supplied username reference: strict format allowlist, and the
+     * caller may only reference its own account unless it has the ADMIN role.
+     */
+    static String authorizeUsername(HttpServletRequest request, String username) {
+        if (username == null || !USERNAME_PATTERN.matcher(username).matches()) {
+            throw new InvalidReferenceException("Invalid username");
+        }
+        Principal principal = request.getUserPrincipal();
+        if (principal == null) {
+            throw new ForbiddenReferenceException("Authentication required");
+        }
+        if (!username.equals(principal.getName()) && !request.isUserInRole("ADMIN")) {
+            throw new ForbiddenReferenceException("Access denied");
+        }
+        return username;
+    }
+
+    /**
+     * Ensure a record looked up by a client-supplied reference belongs to the caller
+     * (or the caller is ADMIN). Returns the record unchanged when allowed.
+     */
+    static User authorizeOwner(HttpServletRequest request, User found) {
+        if (found != null) {
+            authorizeUsername(request, found.getUsername());
+        }
+        return found;
+    }
 
 
     /**
@@ -93,8 +142,9 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/sec?username=joychou">http://localhost:8080/sqli/jdbc/sec?username=joychou</a>
      */
     @RequestMapping("/jdbc/sec")
-    public String jdbc_sqli_sec(@RequestParam("username") String username) {
+    public String jdbc_sqli_sec(HttpServletRequest request, @RequestParam("username") String username) {
 
+        authorizeUsername(request, username);
         StringBuilder result = new StringBuilder();
         try {
             Class.forName(driver);
@@ -181,8 +231,8 @@ public class SQLI {
      * <p>select * from users where username = 'joychou' or '1'='1' </p>
      */
     @GetMapping("/mybatis/vuln01")
-    public List<User> mybatisVuln01(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln01(username);
+    public List<User> mybatisVuln01(HttpServletRequest request, @RequestParam("username") String username) {
+        return userMapper.findByUserNameVuln01(authorizeUsername(request, username));
     }
 
     /**
@@ -191,8 +241,8 @@ public class SQLI {
      * <p>select * from users where username like '%joychou' or '1'='1%' </p>
      */
     @GetMapping("/mybatis/vuln02")
-    public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+    public List<User> mybatisVuln02(HttpServletRequest request, @RequestParam("username") String username) {
+        return userMapper.findByUserNameVuln02(authorizeUsername(request, username));
     }
 
     /**
@@ -211,8 +261,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec01?username=joychou">http://localhost:8080/sqli/mybatis/sec01?username=joychou</a>
      */
     @GetMapping("/mybatis/sec01")
-    public User mybatisSec01(@RequestParam("username") String username) {
-        return userMapper.findByUserName(username);
+    public User mybatisSec01(HttpServletRequest request, @RequestParam("username") String username) {
+        return userMapper.findByUserName(authorizeUsername(request, username));
     }
 
     /**
@@ -220,8 +270,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec02?id=1">http://localhost:8080/sqli/mybatis/sec02?id=1</a>
      */
     @GetMapping("/mybatis/sec02")
-    public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+    public User mybatisSec02(HttpServletRequest request, @RequestParam("id") Integer id) {
+        return authorizeOwner(request, userMapper.findById(id));
     }
 
 
