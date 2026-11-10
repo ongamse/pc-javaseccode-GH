@@ -40,8 +40,12 @@ public class SecurityUtil {
      */
     public static String gethost(String url) {
         try {
+            if (null == url || !isHttp(url)) {
+                return "";
+            }
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            return null == host ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
@@ -98,6 +102,32 @@ public class SecurityUtil {
             logger.error(e.toString());
             return null;
         }
+    }
+
+
+    /**
+     * Validate a user supplied redirect target. Only same-site absolute paths (e.g. /a/b) or
+     * http/https urls whose host passes {@link #checkURL(String)} are accepted. Protocol-relative
+     * urls (//host), backslashes and control characters are always rejected.
+     *
+     * @param url the redirect target
+     * @return the original url if it is safe to redirect to; otherwise null
+     */
+    public static String checkRedirectURL(String url) {
+        if (null == url || url.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (c == '\\' || Character.isISOControl(c) || Character.isWhitespace(c)) {
+                return null;
+            }
+        }
+        if (url.startsWith("/")) {
+            // "//host" is protocol-relative and would leave the site.
+            return url.startsWith("//") ? null : url;
+        }
+        return checkURL(url);
     }
 
 

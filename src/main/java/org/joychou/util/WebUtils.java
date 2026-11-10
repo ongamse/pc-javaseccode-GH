@@ -3,9 +3,9 @@ package org.joychou.util;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import java.io.*;
+import java.util.regex.Pattern;
 
 import com.google.common.base.Preconditions;
-import org.springframework.web.util.HtmlUtils;
 
 public class WebUtils {
 
@@ -27,8 +27,40 @@ public class WebUtils {
     }
 
 
+    private static final Pattern JSONP_CALLBACK_PATTERN = Pattern.compile("^[a-zA-Z_$][a-zA-Z0-9_$.]{0,63}$");
+
+    /**
+     * Only plain JavaScript identifiers (optionally dotted) are valid JSONP callbacks.
+     */
+    public static boolean isValidJsonpCallback(String callback) {
+        return callback != null && JSONP_CALLBACK_PATTERN.matcher(callback).matches();
+    }
+
     public static String json2Jsonp(String callback, String jsonStr) {
-        return HtmlUtils.htmlEscape(callback) + "(" + jsonStr + ")";
+        if (!isValidJsonpCallback(callback)) {
+            return "error";
+        }
+        return callback + "(" + jsonStr + ")";
+    }
+
+
+    /**
+     * Remove CR, LF and all other ISO control characters from a value before it is
+     * written to an HTTP response header, to prevent header injection / response splitting.
+     * Returns null for null input.
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (!Character.isISOControl(c)) {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
 
