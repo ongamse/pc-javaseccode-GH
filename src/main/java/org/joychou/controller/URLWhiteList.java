@@ -112,7 +112,11 @@ public class URLWhiteList {
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                String safeUrl = SecurityUtil.checkRedirectURL(url);
+                if (safeUrl != null) {
+                    res.sendRedirect(safeUrl);
+                }
+                return;
             }
         }
 
