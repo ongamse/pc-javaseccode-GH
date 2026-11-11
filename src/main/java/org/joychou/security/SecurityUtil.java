@@ -209,6 +209,31 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Neutralize an untrusted value before it is written into an HTTP response header
+     * (Location, Access-Control-Allow-Origin, Content-Disposition, custom headers) to prevent
+     * CRLF / header injection. Removes CR, LF and every other ISO control character, so a value
+     * can never terminate the header line or start a new header / response body.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null when the input is null
+     */
+    public static String headerValue(String value) {
+        if (null == value) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            // keep horizontal tab (legal in header values), drop all other control chars incl. CR/LF
+            if (ch == '\t' || !Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+
     public static String cmdFilter(String input) {
         if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
