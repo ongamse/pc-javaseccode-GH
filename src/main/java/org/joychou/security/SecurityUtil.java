@@ -12,12 +12,19 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern HOST_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$");
+    private static final Pattern LS_FLAG_PATTERN = Pattern.compile("^-[alhFR1]+$");
+    private static final Set<String> NO_ARG_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -200,11 +207,58 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Validate a host[:port] value (e.g. the Host header) before it is used as a program argument.
+     *
+     * @param host host header value
+     * @return the host when it is a plain hostname/IP with an optional port; otherwise null
+     */
+    public static String hostFilter(String host) {
+        if (null == host || !HOST_PATTERN.matcher(host).matches()) {
+            return null;
+        }
+        return host;
+    }
+
+
+    /**
+     * Turn a user supplied command line into an argv array that is safe to hand to
+     * {@link ProcessBuilder} (never through a shell). Only allowlisted programs are accepted,
+     * and arguments are restricted so they cannot smuggle options that read or write files.
+     *
+     * @param cmd user supplied command line, e.g. "ls -la /tmp"
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] cmdArgv(String cmd) {
+        if (null == cmd || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] tokens = cmd.trim().split("\\s+");
+        String program = tokens[0];
+
+        if (NO_ARG_COMMANDS.contains(program)) {
+            return tokens.length == 1 ? tokens : null;
+        }
+        if (!"ls".equals(program)) {
+            return null;
+        }
+        for (int i = 1; i < tokens.length; i++) {
+            String arg = tokens[i];
+            boolean isFlag = LS_FLAG_PATTERN.matcher(arg).matches();
+            boolean isPath = !arg.startsWith("-") && cmdFilter(arg) != null;
+            if (!isFlag && !isPath) {
+                return null;
+            }
+        }
+        return tokens;
     }
 
 
