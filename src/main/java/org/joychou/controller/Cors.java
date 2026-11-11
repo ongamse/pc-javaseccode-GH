@@ -24,16 +24,24 @@ public class Cors {
 
     @GetMapping("/vuln/origin")
     public String vuls1(HttpServletRequest request, HttpServletResponse response) {
-        String origin = request.getHeader("origin");
-        response.setHeader("Access-Control-Allow-Origin", origin); // set origin from header
-        response.setHeader("Access-Control-Allow-Credentials", "true");  // allow cookie
+        // only reflect origins from the trusted allowlist; otherwise send no CORS headers
+        String allowOrigin = SecurityUtil.corsAllowOrigin(request.getHeader("origin"));
+        if (allowOrigin != null) {
+            response.setHeader("Access-Control-Allow-Origin", allowOrigin);
+            response.setHeader("Access-Control-Allow-Credentials", "true");  // allow cookie
+            response.addHeader("Vary", "Origin");
+        }
         return info;
     }
 
     @GetMapping("/vuln/setHeader")
-    public String vuls2(HttpServletResponse response) {
-        // 后端设置Access-Control-Allow-Origin为*的情况下，跨域的时候前端如果设置withCredentials为true会异常
-        response.setHeader("Access-Control-Allow-Origin", "*");
+    public String vuls2(HttpServletRequest request, HttpServletResponse response) {
+        // no wildcard: only allow trusted origins (without credentials); otherwise send no CORS headers
+        String allowOrigin = SecurityUtil.corsAllowOrigin(request.getHeader("Origin"));
+        if (allowOrigin != null) {
+            response.setHeader("Access-Control-Allow-Origin", allowOrigin);
+            response.addHeader("Vary", "Origin");
+        }
         return info;
     }
 
@@ -107,11 +115,15 @@ public class Cors {
 
         // 如果origin不为空并且origin不在白名单内，认定为不安全。
         // 如果origin为空，表示是同域过来的请求或者浏览器直接发起的请求。
-        if (origin != null && SecurityUtil.checkURL(origin) == null) {
+        String allowOrigin = SecurityUtil.corsAllowOrigin(origin);
+        if (origin != null && allowOrigin == null) {
             return "Origin is not safe.";
         }
-        response.setHeader("Access-Control-Allow-Origin", origin);
-        response.setHeader("Access-Control-Allow-Credentials", "true");
+        if (allowOrigin != null) {
+            response.setHeader("Access-Control-Allow-Origin", allowOrigin);
+            response.setHeader("Access-Control-Allow-Credentials", "true");
+            response.addHeader("Vary", "Origin");
+        }
         return LoginUtils.getUserInfo2JsonStr(request);
     }
 

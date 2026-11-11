@@ -12,12 +12,22 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern HOST_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$");
+    private static final Pattern JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:(postgresql|db2)://([a-zA-Z0-9][a-zA-Z0-9.-]*(?::[0-9]{1,5})?)/[a-zA-Z0-9_.-]+$");
+    private static final Pattern LS_FLAG_PATTERN = Pattern.compile("^-[alhFR1]+$");
+    private static final Set<String> NO_ARG_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -96,6 +106,46 @@ public class SecurityUtil {
             return null;
         } catch (NullPointerException e) {
             logger.error(e.toString());
+            return null;
+        }
+    }
+
+
+    /**
+     * Validate an untrusted redirect target. Only two shapes are accepted:
+     * <ul>
+     *   <li>a same-origin absolute path such as <code>/a/b?x=1</code> (not protocol-relative <code>//</code>);</li>
+     *   <li>an absolute http(s) url whose strictly parsed host is allowed by {@link #checkURL(String)}.</li>
+     * </ul>
+     * Backslashes, whitespace / control characters, userinfo and any non-http(s) scheme are rejected.
+     *
+     * @param url untrusted redirect target
+     * @return the original target when safe to redirect to; null otherwise
+     */
+    public static String safeRedirectUrl(String url) {
+        if (null == url || url.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char ch = url.charAt(i);
+            if (ch == '\\' || Character.isISOControl(ch) || Character.isWhitespace(ch)) {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(url);
+            if (url.startsWith("/")) {
+                // same-origin path only: no protocol-relative url, no scheme, no authority
+                if (url.startsWith("//") || uri.getScheme() != null || uri.getRawAuthority() != null) {
+                    return null;
+                }
+                return url;
+            }
+            if (!isHttp(url) || uri.getRawUserInfo() != null || uri.getHost() == null) {
+                return null;
+            }
+            return checkURL(url);
+        } catch (URISyntaxException e) {
             return null;
         }
     }
@@ -199,12 +249,138 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Neutralize an untrusted value before it is written into an HTTP response header
+     * (Location, Access-Control-Allow-Origin, Content-Disposition, custom headers) to prevent
+     * CRLF / header injection. Removes CR, LF and every other ISO control character, so a value
+     * can never terminate the header line or start a new header / response body.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null when the input is null
+     */
+    public static String headerValue(String value) {
+        if (null == value) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            // keep horizontal tab (legal in header values), drop all other control chars incl. CR/LF
+            if (ch == '\t' || !Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+
+    /**
+     * Resolve the value of Access-Control-Allow-Origin for an untrusted request Origin header.
+     * The origin must be a bare http(s) origin (scheme://host[:port], no user info, path, query or
+     * fragment) whose strictly parsed host is allowed by {@link #checkURL(String)}.
+     *
+     * @param origin the request Origin header
+     * @return the origin (control characters stripped) when it is a trusted origin; null otherwise,
+     *         in which case no CORS headers must be sent
+     */
+    public static String corsAllowOrigin(String origin) {
+        if (null == origin || checkURL(origin) == null) {
+            return null;
+        }
+        try {
+            URI uri = new URI(origin);
+            String path = uri.getRawPath();
+            if (uri.getRawUserInfo() != null || uri.getHost() == null
+                    || (path != null && !path.isEmpty())
+                    || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return headerValue(origin);
+    }
+
+
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Validate a host[:port] value (e.g. the Host header) before it is used as a program argument.
+     *
+     * @param host host header value
+     * @return the host when it is a plain hostname/IP with an optional port; otherwise null
+     */
+    public static String hostFilter(String host) {
+        if (null == host || !HOST_PATTERN.matcher(host).matches()) {
+            return null;
+        }
+        return host;
+    }
+
+
+    /**
+     * Validate a user supplied JDBC url before it is handed to {@link java.sql.DriverManager}.
+     * Only <code>jdbc:postgresql://host[:port]/db</code> and <code>jdbc:db2://host[:port]/db</code>
+     * are accepted: no query string, no user info, no driver properties (socketFactory, loggerFile, ...),
+     * and the host must resolve only to public addresses.
+     *
+     * @param jdbcUrl jdbc url
+     * @param scheme  required sub protocol, e.g. "postgresql" or "db2"
+     * @return the jdbc url when it is allowed; otherwise null
+     */
+    public static String jdbcUrlFilter(String jdbcUrl, String scheme) {
+        if (null == jdbcUrl || null == scheme) {
+            return null;
+        }
+        Matcher m = JDBC_URL_PATTERN.matcher(jdbcUrl);
+        if (!m.matches() || !scheme.equals(m.group(1))) {
+            return null;
+        }
+        // reuse the SSRF host check on the host part (resolves and checks every address)
+        if (!checkSSRFWithoutRedirect("http://" + m.group(2) + "/")) {
+            return null;
+        }
+        return jdbcUrl;
+    }
+
+
+    /**
+     * Turn a user supplied command line into an argv array that is safe to hand to
+     * {@link ProcessBuilder} (never through a shell). Only allowlisted programs are accepted,
+     * and arguments are restricted so they cannot smuggle options that read or write files.
+     *
+     * @param cmd user supplied command line, e.g. "ls -la /tmp"
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] cmdArgv(String cmd) {
+        if (null == cmd || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] tokens = cmd.trim().split("\\s+");
+        String program = tokens[0];
+
+        if (NO_ARG_COMMANDS.contains(program)) {
+            return tokens.length == 1 ? tokens : null;
+        }
+        if (!"ls".equals(program)) {
+            return null;
+        }
+        for (int i = 1; i < tokens.length; i++) {
+            String arg = tokens[i];
+            boolean isFlag = LS_FLAG_PATTERN.matcher(arg).matches();
+            boolean isPath = !arg.startsWith("-") && cmdFilter(arg) != null;
+            if (!isFlag && !isPath) {
+                return null;
+            }
+        }
+        return tokens;
     }
 
 

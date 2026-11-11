@@ -38,6 +38,16 @@
     var tokenHeader = {};
     tokenHeader[csrfToken.tokenName] = csrfToken.tokenValue;  // header must be a object
 
+    // Only follow redirects that stay on this origin over http(s); blocks javascript:/data: URLs.
+    function isSameOriginHttpUrl(url) {
+        try {
+            var u = new URL(url, location.origin);
+            return (u.protocol === "http:" || u.protocol === "https:") && u.origin === location.origin;
+        } catch (e) {
+            return false;
+        }
+    }
+
     function login() {
         var username = $("input[name='username']").val();
         var password = $("input[name='password']").val();
@@ -53,10 +63,10 @@
             success: function (r) {
                 if (r.code == "0") {
                     // alert(r.message);
-                    if (r.redirectUrl == '') {
+                    if (r.redirectUrl == '' || !isSameOriginHttpUrl(r.redirectUrl)) {
                         location.href = ctx + "index";
                     } else {
-                        location.href = r.redirectUrl;
+                        location.href = new URL(r.redirectUrl, location.origin).href;
                     }
                 } else {
                     alert(r.message);

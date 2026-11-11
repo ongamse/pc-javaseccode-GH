@@ -5,15 +5,19 @@ import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.HttpResponse;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.fluent.Executor;
 import org.apache.http.client.fluent.Request;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
 import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,7 +28,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URL;
 import java.net.URLConnection;
 import java.util.concurrent.*;
 
@@ -35,10 +38,56 @@ public class HttpUtils {
 
     private final static Logger logger = LoggerFactory.getLogger(HttpUtils.class);
 
+    private static final String SSRF_BLOCKED = "[-] SSRF check failed";
+
+    /**
+     * Validate an outbound url and return the strictly parsed URI that must be used for the request.
+     * Only http/https is accepted and every address the host resolves to must be public.
+     * Callers must also disable redirect following so a 3xx cannot reach an unchecked target.
+     *
+     * @param url untrusted url
+     * @return the validated URI
+     * @throws IOException if the url is not an allowed destination
+     */
+    private static URI safeUri(String url) throws IOException {
+        if (url == null || !SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            throw new IOException(SSRF_BLOCKED);
+        }
+        try {
+            return new URI(url);
+        } catch (Exception e) {
+            throw new IOException(SSRF_BLOCKED);
+        }
+    }
+
+
+    /**
+     * Validate the url, then open an http(s) connection to it that does not follow redirects.
+     *
+     * @param url untrusted url
+     * @return an unconnected HttpURLConnection to the validated url
+     * @throws IOException if the url is not an allowed destination
+     */
+    public static HttpURLConnection openSafeConnection(String url) throws IOException {
+        URLConnection urlConnection = safeUri(url).toURL().openConnection();
+        HttpURLConnection conn = (HttpURLConnection) urlConnection;
+        conn.setInstanceFollowRedirects(false);
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(10000);
+        return conn;
+    }
+
+
     public static String commonHttpClient(String url) {
 
         HttpClient client = new HttpClient();
-        GetMethod method = new GetMethod(url);
+        GetMethod method;
+        try {
+            method = new GetMethod(safeUri(url).toString());
+        } catch (IOException e) {
+            return "Error: " + e.getMessage();
+        }
+        method.setFollowRedirects(false);
 
         try {
             client.executeMethod(method); // send request
@@ -56,7 +105,8 @@ public class HttpUtils {
 
     public static String request(String url) {
         try {
-            return Request.Get(url).execute().returnContent().toString();
+            CloseableHttpClient client = HttpClientBuilder.create().disableRedirectHandling().build();
+            return Executor.newInstance(client).execute(Request.Get(safeUri(url))).returnContent().toString();
         } catch (Exception e) {
             return e.getMessage();
         }
@@ -70,9 +120,9 @@ public class HttpUtils {
         try {
 
             CloseableHttpClient client = HttpClients.createDefault();
-            HttpGet httpGet = new HttpGet(url);
-            // set redirect enable false
-            // httpGet.setConfig(RequestConfig.custom().setRedirectsEnabled(false).build());
+            HttpGet httpGet = new HttpGet(safeUri(url));
+            // do not follow redirects: the target was validated, a redirect target would not be
+            httpGet.setConfig(RequestConfig.custom().setRedirectsEnabled(false).build());
             HttpResponse httpResponse = client.execute(httpGet); // send request
             BufferedReader rd = new BufferedReader(new InputStreamReader(httpResponse.getEntity().getContent()));
 
@@ -91,8 +141,7 @@ public class HttpUtils {
 
     public static String URLConnection(String url) {
         try {
-            URL u = new URL(url);
-            URLConnection urlConnection = u.openConnection();
+            URLConnection urlConnection = openSafeConnection(url);
             BufferedReader in = new BufferedReader(new InputStreamReader(urlConnection.getInputStream())); //send request
             String inputLine;
             StringBuilder html = new StringBuilder();
@@ -115,10 +164,7 @@ public class HttpUtils {
      */
     public static String HttpURLConnection(String url) {
         try {
-            URL u = new URL(url);
-            URLConnection urlConnection = u.openConnection();
-            HttpURLConnection conn = (HttpURLConnection) urlConnection;
-//             conn.setInstanceFollowRedirects(false);
+            HttpURLConnection conn = openSafeConnection(url);
 //             Many HttpURLConnection methods can send http request, such as getResponseCode, getHeaderField
             InputStream is = conn.getInputStream();  // send request
             BufferedReader in = new BufferedReader(new InputStreamReader(is));
@@ -144,8 +190,8 @@ public class HttpUtils {
      */
     public static String Jsoup(String url) {
         try {
-            Document doc = Jsoup.connect(url)
-//                    .followRedirects(false)
+            Document doc = Jsoup.connect(safeUri(url).toString())
+                    .followRedirects(false)
                     .timeout(3000)
                     .cookie("name", "joychou") // request cookies
                     .execute().parse();
@@ -163,8 +209,9 @@ public class HttpUtils {
      */
     public static String okhttp(String url) throws IOException {
         OkHttpClient client = new OkHttpClient();
-//         client.setFollowRedirects(false);
-        com.squareup.okhttp.Request ok_http = new com.squareup.okhttp.Request.Builder().url(url).build();
+        client.setFollowRedirects(false);
+        client.setFollowSslRedirects(false);
+        com.squareup.okhttp.Request ok_http = new com.squareup.okhttp.Request.Builder().url(safeUri(url).toString()).build();
         return client.newCall(ok_http).execute().body().string();
     }
 
@@ -178,8 +225,11 @@ public class HttpUtils {
      */
     public static void imageIO(String url) {
         try {
-            URL u = new URL(url);
-            ImageIO.read(u); // send request
+            // only remote public http(s) images; reject file:, jar:, internal hosts and redirects
+            HttpURLConnection conn = openSafeConnection(url);
+            try (InputStream in = conn.getInputStream()) { // send request
+                ImageIO.read(in);
+            }
         } catch (IOException e) {
             logger.error(e.getMessage());
         }
@@ -195,7 +245,10 @@ public class HttpUtils {
      */
     public static void IOUtils(String url) {
         try {
-            IOUtils.toByteArray(URI.create(url));
+            HttpURLConnection conn = openSafeConnection(url);
+            try (InputStream in = conn.getInputStream()) { // send request
+                IOUtils.toByteArray(in);
+            }
         } catch (IOException e) {
             logger.error(e.getMessage());
         }
@@ -203,10 +256,12 @@ public class HttpUtils {
 
 
     public static String HttpAsyncClients(String url) {
-        CloseableHttpAsyncClient httpclient = HttpAsyncClients.createDefault();
+        CloseableHttpAsyncClient httpclient = HttpAsyncClients.custom()
+                .setDefaultRequestConfig(RequestConfig.custom().setRedirectsEnabled(false).build())
+                .build();
         try {
             httpclient.start();
-            final HttpGet request = new HttpGet(url);
+            final HttpGet request = new HttpGet(safeUri(url));
             Future<HttpResponse> future = httpclient.execute(request, null);
             HttpResponse response = future.get(6000, TimeUnit.MILLISECONDS);
             return EntityUtils.toString(response.getEntity());
