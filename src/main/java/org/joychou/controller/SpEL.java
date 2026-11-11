@@ -1,5 +1,6 @@
 package org.joychou.controller;
 
+import org.joychou.util.WebUtils;
 import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.ExpressionException;
 import org.springframework.expression.ExpressionParser;
@@ -32,7 +33,7 @@ public class SpEL {
         EvaluationContext context = SimpleEvaluationContext.forReadOnlyDataBinding().build();
         try {
             Object value = parser.parseExpression(expression).getValue(context);
-            return String.valueOf(value);
+            return WebUtils.htmlEscape(String.valueOf(value));
         } catch (ExpressionException e) {
             return "Invalid expression.";
         }

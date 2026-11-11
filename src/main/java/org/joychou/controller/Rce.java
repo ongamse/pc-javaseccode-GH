@@ -1,5 +1,6 @@
 package org.joychou.controller;
 
+import org.joychou.util.WebUtils;
 import groovy.lang.GroovyShell;
 import jdk.nashorn.api.scripting.ClassFilter;
 import jdk.nashorn.api.scripting.NashornScriptEngineFactory;
@@ -70,9 +71,9 @@ public class Rce {
             inBr.close();
             in.close();
         } catch (Exception e) {
-            return e.toString();
+            return WebUtils.htmlEscape(e.toString());
         }
-        return sb.toString();
+        return WebUtils.htmlEscape(sb.toString());
     }
 
 
