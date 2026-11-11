@@ -3,6 +3,9 @@ package org.joychou.controller;
 import com.thoughtworks.xstream.XStream;
 import com.thoughtworks.xstream.io.xml.DomDriver;
 import com.thoughtworks.xstream.io.xml.DomReader;
+import com.thoughtworks.xstream.security.NoTypePermission;
+import com.thoughtworks.xstream.security.NullPermission;
+import com.thoughtworks.xstream.security.PrimitiveTypePermission;
 import org.joychou.dao.User;
 import org.joychou.util.WebUtils;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -35,9 +38,21 @@ public class XStreamRce {
         dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
         Document document = dbf.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
 
-        XStream xstream = new XStream(new DomDriver());
+        XStream xstream = secureXStream();
         xstream.unmarshal(new DomReader(document));
         return "xstream";
+    }
+
+    /**
+     * XStream with a deny-all default and an explicit allowlist of types that may be deserialized.
+     */
+    private static XStream secureXStream() {
+        XStream xstream = new XStream(new DomDriver());
+        xstream.addPermission(NoTypePermission.NONE);
+        xstream.addPermission(NullPermission.NULL);
+        xstream.addPermission(PrimitiveTypePermission.PRIMITIVES);
+        xstream.allowTypes(new Class[]{User.class, String.class, Integer.class});
+        return xstream;
     }
 
     public static void main(String[] args) {
@@ -45,7 +60,7 @@ public class XStreamRce {
         user.setId(0);
         user.setUsername("admin");
 
-        XStream xstream = new XStream(new DomDriver());
+        XStream xstream = secureXStream();
         String xml = xstream.toXML(user); // Serialize
         System.out.println(xml);
 
