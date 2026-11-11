@@ -101,7 +101,8 @@ public class URLWhiteList {
 
         logger.info("url:  " + url);
 
-        if (!SecurityUtil.isHttp(url)) {
+        // Reject non-http(s) urls and urls whose host (strict URI parse) resolves to an internal address.
+        if (!SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
             return;
         }
 

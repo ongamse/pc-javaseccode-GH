@@ -1,9 +1,9 @@
 package org.joychou.security.ssrf;
 
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.URI;
-import java.net.URL;
 import java.util.ArrayList;
 
 import org.apache.commons.lang.StringUtils;
@@ -71,7 +71,8 @@ public class SSRFChecker {
                     return false;  // 内网ip直接return，非内网ip继续判断是否有重定向
                 }
 
-                connection = (HttpURLConnection) new URL(finalUrl).openConnection();
+                // Connect with the same strictly parsed URI that was just checked (no URL/URI parser differential).
+                connection = (HttpURLConnection) new URI(finalUrl).toURL().openConnection();
                 connection.setInstanceFollowRedirects(false);
                 connection.setUseCaches(false); // 设置为false，手动处理跳转，可以拿到每个跳转的URL
                 connection.setConnectTimeout(connectTime);
@@ -111,12 +112,58 @@ public class SSRFChecker {
             return true; // 异常URL当成内网IP等非法URL处理
         }
 
-        String ip = host2ip(host);
-        if (ip.equals("")) {
+        // Resolve the host once and check EVERY address it resolves to (a name can have
+        // several A/AAAA records; checking only one lets an attacker mix in an internal one).
+        InetAddress[] addresses;
+        try {
+            addresses = InetAddress.getAllByName(normalizeHost(host)); // send dns request
+        } catch (Exception e) {
+            logger.error("isInternalIpByUrl exception " + e.getMessage());
             return true; // 如果域名转换为IP异常，则认为是非法URL
         }
+        if (addresses == null || addresses.length == 0) {
+            return true;
+        }
+        for (InetAddress address : addresses) {
+            if (isInternalAddress(address)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
-        return isInternalIp(ip);
+
+    /**
+     * Convert an octal ip host to decimal; other hosts are returned unchanged.
+     * Synchronized because {@link #isOctalIP(String)} hands its result back through a static field.
+     */
+    private static synchronized String normalizeHost(String host) {
+        if (isOctalIP(host)) {
+            return decimalIp;
+        }
+        return host;
+    }
+
+
+    /**
+     * Check one resolved address: loopback, wildcard, link-local (cloud metadata), site-local,
+     * multicast, IPv6 unique-local and the configured block subnets are all internal.
+     */
+    private static boolean isInternalAddress(InetAddress address) {
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress() || address.isMulticastAddress()) {
+            logger.error("[-] SSRF check failed. Internal IP: " + address.getHostAddress());
+            return true;
+        }
+        byte[] raw = address.getAddress();
+        if (raw.length == 16 && (raw[0] & 0xfe) == 0xfc) { // fc00::/7 unique local
+            logger.error("[-] SSRF check failed. Internal IP: " + address.getHostAddress());
+            return true;
+        }
+        if (address instanceof Inet4Address) {
+            return isInternalIp(address.getHostAddress());
+        }
+        return false;
     }
 
 
@@ -291,7 +338,7 @@ public class SSRFChecker {
         try {
             // use URI instead of URL
             URI u = new URI(url);
-            if (SecurityUtil.isHttp(url)) {
+            if (SecurityUtil.isHttp(url) && u.getHost() != null) {
                 return u.getHost();
             }
             return "";

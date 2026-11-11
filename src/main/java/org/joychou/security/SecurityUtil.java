@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
@@ -22,6 +23,8 @@ public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
     private static final Pattern HOST_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$");
+    private static final Pattern JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:(postgresql|db2)://([a-zA-Z0-9][a-zA-Z0-9.-]*(?::[0-9]{1,5})?)/[a-zA-Z0-9_.-]+$");
     private static final Pattern LS_FLAG_PATTERN = Pattern.compile("^-[alhFR1]+$");
     private static final Set<String> NO_ARG_COMMANDS = new HashSet<String>(
             Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname"));
@@ -226,6 +229,32 @@ public class SecurityUtil {
             return null;
         }
         return host;
+    }
+
+
+    /**
+     * Validate a user supplied JDBC url before it is handed to {@link java.sql.DriverManager}.
+     * Only <code>jdbc:postgresql://host[:port]/db</code> and <code>jdbc:db2://host[:port]/db</code>
+     * are accepted: no query string, no user info, no driver properties (socketFactory, loggerFile, ...),
+     * and the host must resolve only to public addresses.
+     *
+     * @param jdbcUrl jdbc url
+     * @param scheme  required sub protocol, e.g. "postgresql" or "db2"
+     * @return the jdbc url when it is allowed; otherwise null
+     */
+    public static String jdbcUrlFilter(String jdbcUrl, String scheme) {
+        if (null == jdbcUrl || null == scheme) {
+            return null;
+        }
+        Matcher m = JDBC_URL_PATTERN.matcher(jdbcUrl);
+        if (!m.matches() || !scheme.equals(m.group(1))) {
+            return null;
+        }
+        // reuse the SSRF host check on the host part (resolves and checks every address)
+        if (!checkSSRFWithoutRedirect("http://" + m.group(2) + "/")) {
+            return null;
+        }
+        return jdbcUrl;
     }
 
 
