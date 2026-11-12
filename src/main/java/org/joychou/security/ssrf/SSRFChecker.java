@@ -291,7 +291,7 @@ public class SSRFChecker {
         try {
             // use URI instead of URL
             URI u = new URI(url);
-            if (SecurityUtil.isHttp(url)) {
+            if (SecurityUtil.isHttp(url) && null != u.getHost()) {
                 return u.getHost();
             }
             return "";

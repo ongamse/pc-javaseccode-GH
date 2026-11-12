@@ -7,10 +7,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 
 @RestController
@@ -40,9 +41,34 @@ public class PathTraversal {
         logger.info("Working directory: " + System.getProperty("user.dir"));
         logger.info("File path: " + imgFile);
 
-        File f = new File(imgFile);
-        if (f.exists() && !f.isDirectory()) {
-            byte[] data = Files.readAllBytes(Paths.get(imgFile));
+        if (imgFile == null) {
+            return "Bad boy. Illegal file path.";
+        }
+
+        Path safePath;
+        try {
+            // Only files inside the working directory may be read.
+            Path base = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+            Path resolved = base.resolve(imgFile).normalize();
+            if (!resolved.startsWith(base)) {
+                logger.info("Illegal file path: " + imgFile);
+                return "Bad boy. Illegal file path.";
+            }
+            if (!Files.exists(resolved)) {
+                return "File doesn't exist or is not a file.";
+            }
+            // Resolve symlinks and re-check containment.
+            safePath = resolved.toRealPath();
+            if (!safePath.startsWith(base.toRealPath())) {
+                logger.info("Illegal file path: " + imgFile);
+                return "Bad boy. Illegal file path.";
+            }
+        } catch (InvalidPathException e) {
+            return "Bad boy. Illegal file path.";
+        }
+
+        if (Files.isRegularFile(safePath)) {
+            byte[] data = Files.readAllBytes(safePath);
             return new String(Base64.encodeBase64(data));
         } else {
             return "File doesn't exist or is not a file.";

@@ -8,17 +8,28 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
-    private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "date", "hostname", "uname", "pwd", "ls"));
+    private static final Pattern JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:(postgresql|db2)://([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(:\\d{1,5})?/[A-Za-z0-9_]+(?:\\?([A-Za-z0-9_=&.-]*))?$");
+    private static final Set<String> JDBC_ALLOWED_PARAMS = new HashSet<String>(
+            Arrays.asList("user", "password", "ssl", "sslmode", "connectTimeout", "loginTimeout"));
+    private static Logger logger =LoggerFactory.getLogger(SecurityUtil.class);
 
 
     /**
@@ -39,11 +50,58 @@ public class SecurityUtil {
      * @return host
      */
     public static String gethost(String url) {
+        if (null == url) {
+            return "";
+        }
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String scheme = uri.getScheme();
+            // Only http/https urls have a host that is meaningful for SSRF decisions.
+            if (null == scheme || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+                return "";
+            }
+            String host = uri.getHost();
+            return null == host ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
+        }
+    }
+
+
+    /**
+     * Check that a url is safe to be requested by the server: it must be a well-formed
+     * http/https url with a host, no user info, and the host must not resolve to an internal,
+     * loopback, link-local or metadata address (see {@link SSRFChecker#isInternalIpByUrl(String)}).
+     * Redirects are not followed by this check, so callers must disable redirects
+     * (or re-validate every redirect target).
+     *
+     * @param url the url that needs to check
+     * @return true if the url may be requested, false otherwise
+     */
+    public static boolean isSafeOutboundUrl(String url) {
+        if (null == url || !isHttp(url)) {
+            return false;
+        }
+        try {
+            URI uri = new URI(url);
+            if (null == uri.getHost() || null != uri.getRawUserInfo()) {
+                return false;
+            }
+        } catch (URISyntaxException e) {
+            return false;
+        }
+        try {
+            if (!checkSSRFWithoutRedirect(url)) {
+                return false;
+            }
+            // Also reject address classes the configured subnet list may not cover (IPv6 loopback, link-local/metadata, ...).
+            InetAddress addr = InetAddress.getByName(SSRFChecker.host2ip(gethost(url)));
+            return !(addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                    || addr.isSiteLocalAddress() || addr.isMulticastAddress());
+        } catch (Exception e) {
+            // Fail closed: unresolvable host or unparsable address is not a safe destination.
+            logger.error("Unsafe outbound url: " + e.toString());
+            return false;
         }
     }
 
@@ -98,6 +156,93 @@ public class SecurityUtil {
             logger.error(e.toString());
             return null;
         }
+    }
+
+
+    /**
+     * Whether the value is a same-site relative path such as <code>/a/b?c=d</code>. Protocol-relative
+     * (<code>//host</code>), backslash forms (<code>/\host</code>), control characters and anything
+     * that is not a well-formed URI reference are rejected, so browsers cannot treat it as another host.
+     */
+    private static boolean isRelativePath(String url) {
+        if (null == url || !url.startsWith("/") || url.startsWith("//") || url.indexOf('\\') != -1) {
+            return false;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            if (Character.isISOControl(url.charAt(i))) {
+                return false;
+            }
+        }
+        try {
+            URI uri = new URI(url);
+            return null == uri.getScheme() && null == uri.getRawAuthority();
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
+
+    /**
+     * Validate a request-supplied redirect target (CWE-601). Only a same-site relative path or an
+     * absolute http/https url whose host passes {@link #checkURL(String)} (the safe-domain list in
+     * url/url_safe_domain.xml) is accepted.
+     *
+     * @param url the untrusted redirect target
+     * @return the original url if it may be redirected to; null otherwise (callers must fail closed)
+     */
+    public static String checkRedirectURL(String url) {
+        if (null == url) {
+            return null;
+        }
+        if (isRelativePath(url)) {
+            return url;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            if (Character.isISOControl(url.charAt(i)) || url.indexOf('\\') != -1) {
+                return null;
+            }
+        }
+        try {
+            if (null != new URI(url).getRawUserInfo()) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return checkURL(url);
+    }
+
+
+    /**
+     * Validate a user supplied JDBC url before connecting. Only plain
+     * <code>jdbc:postgresql://host[:port]/db</code> and <code>jdbc:db2://host[:port]/db</code> urls are accepted,
+     * the host must be a public one, and only a small set of harmless postgresql query parameters is allowed
+     * (so driver properties such as socketFactory / sslfactory / loggerFile cannot be injected).
+     *
+     * @param jdbcUrl the jdbc url that needs to check
+     * @return true if the url may be used to connect, false otherwise
+     */
+    public static boolean checkJdbcUrl(String jdbcUrl) {
+        if (null == jdbcUrl) {
+            return false;
+        }
+        Matcher m = JDBC_URL_PATTERN.matcher(jdbcUrl);
+        if (!m.matches()) {
+            return false;
+        }
+        String query = m.group(4);
+        if (null != query) {
+            if (!"postgresql".equals(m.group(1))) {
+                return false;
+            }
+            for (String pair : query.split("&", -1)) {
+                int idx = pair.indexOf('=');
+                if (idx <= 0 || !JDBC_ALLOWED_PARAMS.contains(pair.substring(0, idx))) {
+                    return false;
+                }
+            }
+        }
+        return isSafeOutboundUrl("http://" + m.group(2) + (null == m.group(3) ? "" : m.group(3)) + "/");
     }
 
 
@@ -209,6 +354,30 @@ public class SecurityUtil {
 
 
     /**
+     * Split a user supplied command line into an argv array for execution without a shell.
+     * The executable must be in a fixed allowlist and every argument must pass {@link #cmdFilter(String)}.
+     *
+     * @param cmd user supplied command line
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] cmdArgv(String cmd) {
+        if (null == cmd || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (null == cmdFilter(argv[i])) {
+                return null;
+            }
+        }
+        return argv;
+    }
+
+
+    /**
      * 过滤mybatis中order by不能用#的情况。
      * 严格限制用户输入只能包含<code>a-zA-Z0-9_-.</code>字符。
      *
@@ -246,6 +415,29 @@ public class SecurityUtil {
             }
         }
 
+        return sb.toString();
+    }
+
+    /**
+     * Make a request-derived value safe to be written into an HTTP response header
+     * (CWE-113): removes CR, LF and every other ISO control character (including DEL)
+     * so the value cannot terminate the header line or split the response.
+     * Null stays null so callers keep their existing "no value" behavior.
+     *
+     * @param value the untrusted header value
+     * @return the value without control characters, or null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (null == value) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
         return sb.toString();
     }
 
