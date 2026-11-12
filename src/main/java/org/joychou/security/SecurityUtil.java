@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
@@ -15,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
@@ -23,7 +25,11 @@ public class SecurityUtil {
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
             Arrays.asList("whoami", "id", "date", "hostname", "uname", "pwd", "ls"));
-    private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
+    private static final Pattern JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:(postgresql|db2)://([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(:\\d{1,5})?/[A-Za-z0-9_]+(?:\\?([A-Za-z0-9_=&.-]*))?$");
+    private static final Set<String> JDBC_ALLOWED_PARAMS = new HashSet<String>(
+            Arrays.asList("user", "password", "ssl", "sslmode", "connectTimeout", "loginTimeout"));
+    private static Logger logger =LoggerFactory.getLogger(SecurityUtil.class);
 
 
     /**
@@ -44,11 +50,58 @@ public class SecurityUtil {
      * @return host
      */
     public static String gethost(String url) {
+        if (null == url) {
+            return "";
+        }
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String scheme = uri.getScheme();
+            // Only http/https urls have a host that is meaningful for SSRF decisions.
+            if (null == scheme || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+                return "";
+            }
+            String host = uri.getHost();
+            return null == host ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
+        }
+    }
+
+
+    /**
+     * Check that a url is safe to be requested by the server: it must be a well-formed
+     * http/https url with a host, no user info, and the host must not resolve to an internal,
+     * loopback, link-local or metadata address (see {@link SSRFChecker#isInternalIpByUrl(String)}).
+     * Redirects are not followed by this check, so callers must disable redirects
+     * (or re-validate every redirect target).
+     *
+     * @param url the url that needs to check
+     * @return true if the url may be requested, false otherwise
+     */
+    public static boolean isSafeOutboundUrl(String url) {
+        if (null == url || !isHttp(url)) {
+            return false;
+        }
+        try {
+            URI uri = new URI(url);
+            if (null == uri.getHost() || null != uri.getRawUserInfo()) {
+                return false;
+            }
+        } catch (URISyntaxException e) {
+            return false;
+        }
+        try {
+            if (!checkSSRFWithoutRedirect(url)) {
+                return false;
+            }
+            // Also reject address classes the configured subnet list may not cover (IPv6 loopback, link-local/metadata, ...).
+            InetAddress addr = InetAddress.getByName(SSRFChecker.host2ip(gethost(url)));
+            return !(addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                    || addr.isSiteLocalAddress() || addr.isMulticastAddress());
+        } catch (Exception e) {
+            // Fail closed: unresolvable host or unparsable address is not a safe destination.
+            logger.error("Unsafe outbound url: " + e.toString());
+            return false;
         }
     }
 
@@ -103,6 +156,39 @@ public class SecurityUtil {
             logger.error(e.toString());
             return null;
         }
+    }
+
+
+    /**
+     * Validate a user supplied JDBC url before connecting. Only plain
+     * <code>jdbc:postgresql://host[:port]/db</code> and <code>jdbc:db2://host[:port]/db</code> urls are accepted,
+     * the host must be a public one, and only a small set of harmless postgresql query parameters is allowed
+     * (so driver properties such as socketFactory / sslfactory / loggerFile cannot be injected).
+     *
+     * @param jdbcUrl the jdbc url that needs to check
+     * @return true if the url may be used to connect, false otherwise
+     */
+    public static boolean checkJdbcUrl(String jdbcUrl) {
+        if (null == jdbcUrl) {
+            return false;
+        }
+        Matcher m = JDBC_URL_PATTERN.matcher(jdbcUrl);
+        if (!m.matches()) {
+            return false;
+        }
+        String query = m.group(4);
+        if (null != query) {
+            if (!"postgresql".equals(m.group(1))) {
+                return false;
+            }
+            for (String pair : query.split("&", -1)) {
+                int idx = pair.indexOf('=');
+                if (idx <= 0 || !JDBC_ALLOWED_PARAMS.contains(pair.substring(0, idx))) {
+                    return false;
+                }
+            }
+        }
+        return isSafeOutboundUrl("http://" + m.group(2) + (null == m.group(3) ? "" : m.group(3)) + "/");
     }
 
 
