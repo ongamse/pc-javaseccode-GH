@@ -7,9 +7,12 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+import java.security.Principal;
 import java.sql.*;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -47,6 +50,30 @@ public class SQLI {
 
     @Resource
     private UserMapper userMapper;
+
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    private static class ForbiddenUserAccessException extends RuntimeException {
+        ForbiddenUserAccessException() {
+            super("Access to the requested user is not permitted.");
+        }
+    }
+
+    /**
+     * Object-level authorization: the requested username must be the authenticated principal,
+     * unless the caller has the ADMIN role. Fails closed (403) for anonymous callers.
+     */
+    private static void requireOwnerOrAdmin(HttpServletRequest request, String username) {
+        Principal principal = request.getUserPrincipal();
+        if (principal == null || username == null) {
+            throw new ForbiddenUserAccessException();
+        }
+        if (request.isUserInRole("ADMIN")) {
+            return;
+        }
+        if (!username.equals(principal.getName())) {
+            throw new ForbiddenUserAccessException();
+        }
+    }
 
 
     /**
@@ -99,8 +126,9 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/sec?username=joychou">http://localhost:8080/sqli/jdbc/sec?username=joychou</a>
      */
     @RequestMapping("/jdbc/sec")
-    public String jdbc_sqli_sec(@RequestParam("username") String username) {
+    public String jdbc_sqli_sec(@RequestParam("username") String username, HttpServletRequest request) {
 
+        requireOwnerOrAdmin(request, username);
         StringBuilder result = new StringBuilder();
         try {
             Class.forName(driver);
@@ -187,7 +215,8 @@ public class SQLI {
      * <p>select * from users where username = 'joychou' or '1'='1' </p>
      */
     @GetMapping("/mybatis/vuln01")
-    public List<User> mybatisVuln01(@RequestParam("username") String username) {
+    public List<User> mybatisVuln01(@RequestParam("username") String username, HttpServletRequest request) {
+        requireOwnerOrAdmin(request, username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -197,7 +226,8 @@ public class SQLI {
      * <p>select * from users where username like '%joychou' or '1'='1%' </p>
      */
     @GetMapping("/mybatis/vuln02")
-    public List<User> mybatisVuln02(@RequestParam("username") String username) {
+    public List<User> mybatisVuln02(@RequestParam("username") String username, HttpServletRequest request) {
+        requireOwnerOrAdmin(request, username);
         return userMapper.findByUserNameVuln02(username);
     }
 
@@ -230,7 +260,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec01?username=joychou">http://localhost:8080/sqli/mybatis/sec01?username=joychou</a>
      */
     @GetMapping("/mybatis/sec01")
-    public User mybatisSec01(@RequestParam("username") String username) {
+    public User mybatisSec01(@RequestParam("username") String username, HttpServletRequest request) {
+        requireOwnerOrAdmin(request, username);
         return userMapper.findByUserName(username);
     }
 
@@ -239,8 +270,16 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec02?id=1">http://localhost:8080/sqli/mybatis/sec02?id=1</a>
      */
     @GetMapping("/mybatis/sec02")
-    public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+    public User mybatisSec02(@RequestParam("id") Integer id, HttpServletRequest request) {
+        if (request.getUserPrincipal() == null) {
+            throw new ForbiddenUserAccessException();
+        }
+        User found = userMapper.findById(id);
+        if (found == null) {
+            return null;
+        }
+        requireOwnerOrAdmin(request, found.getUsername());
+        return found;
     }
 
 
