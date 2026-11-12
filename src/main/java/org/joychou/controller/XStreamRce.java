@@ -2,6 +2,9 @@ package org.joychou.controller;
 
 import com.thoughtworks.xstream.XStream;
 import com.thoughtworks.xstream.io.xml.DomDriver;
+import com.thoughtworks.xstream.security.NoTypePermission;
+import com.thoughtworks.xstream.security.NullPermission;
+import com.thoughtworks.xstream.security.PrimitiveTypePermission;
 import org.joychou.dao.User;
 import org.joychou.util.WebUtils;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,9 +32,21 @@ public class XStreamRce {
     public String parseXml(HttpServletRequest request) throws Exception {
         String xml = WebUtils.getRequestBody(request);
         rejectDoctype(xml);  // DomDriver of this xstream version does not disable DTDs / external entities
-        XStream xstream = new XStream(new DomDriver());
+        XStream xstream = secureXStream();
         xstream.fromXML(xml);
         return "xstream";
+    }
+
+    /**
+     * XStream with a type allowlist: deny everything, then permit only the expected types.
+     */
+    private static XStream secureXStream() {
+        XStream xstream = new XStream(new DomDriver());
+        xstream.addPermission(NoTypePermission.NONE);
+        xstream.addPermission(NullPermission.NULL);
+        xstream.addPermission(PrimitiveTypePermission.PRIMITIVES);
+        xstream.allowTypes(new Class[]{User.class, String.class, Integer.class});
+        return xstream;
     }
 
     /**
