@@ -7,7 +7,12 @@ import org.joychou.util.WebUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import org.xml.sax.InputSource;
+
 import javax.servlet.http.HttpServletRequest;
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.StringReader;
 
 
 @RestController
@@ -23,9 +28,24 @@ public class XStreamRce {
     @PostMapping("/xstream")
     public String parseXml(HttpServletRequest request) throws Exception {
         String xml = WebUtils.getRequestBody(request);
+        rejectDoctype(xml);  // DomDriver of this xstream version does not disable DTDs / external entities
         XStream xstream = new XStream(new DomDriver());
         xstream.fromXML(xml);
         return "xstream";
+    }
+
+    /**
+     * Fail closed on any DOCTYPE (and therefore any external entity) before the XML reaches XStream.
+     */
+    private static void rejectDoctype(String xml) throws Exception {
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+        dbf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        dbf.setXIncludeAware(false);
+        dbf.setExpandEntityReferences(false);
+        dbf.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
     }
 
     public static void main(String[] args) {

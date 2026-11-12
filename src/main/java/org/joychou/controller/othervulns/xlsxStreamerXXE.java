@@ -9,8 +9,17 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.multipart.MultipartFile;
 
+import org.xml.sax.helpers.DefaultHandler;
+
+import javax.xml.XMLConstants;
+import javax.xml.parsers.SAXParserFactory;
+import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 
 /**
@@ -33,8 +42,41 @@ public class xlsxStreamerXXE {
 
 
     @PostMapping("/readxlsx")
-    public void xllx_streamer_xxe(MultipartFile file) throws IOException {
-        StreamingReader.builder().open(file.getInputStream());
+    public void xllx_streamer_xxe(MultipartFile file) throws Exception {
+        byte[] content = file.getBytes();
+        rejectXmlWithDoctype(content);  // xlsx-streamer 2.0.0 parses xl/workbook.xml without disabling DTDs
+        StreamingReader.builder().open(new ByteArrayInputStream(content));
+    }
+
+    /**
+     * Fail closed: every XML part of the xlsx package is parsed with DOCTYPE / external entities
+     * disabled before it is handed to xlsx-streamer. Any DOCTYPE makes the parse fail.
+     */
+    private static void rejectXmlWithDoctype(byte[] content) throws Exception {
+        SAXParserFactory spf = SAXParserFactory.newInstance();
+        spf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        spf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        spf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        spf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        spf.setXIncludeAware(false);
+
+        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(content))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                String name = entry.getName().toLowerCase();
+                if (entry.isDirectory() || !(name.endsWith(".xml") || name.endsWith(".rels"))) {
+                    continue;
+                }
+                // Wrap so the SAX parser cannot close the shared zip stream.
+                InputStream part = new FilterInputStream(zis) {
+                    @Override
+                    public void close() {
+                        // keep zis open for the next entry
+                    }
+                };
+                spf.newSAXParser().parse(part, new DefaultHandler());
+            }
+        }
     }
 
 
