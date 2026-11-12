@@ -112,10 +112,16 @@ public class URLWhiteList {
         }
         logger.info("host:  " + host);
 
-        // endsWith .
+        // Redirect only to a validated target (no user info / backslash / control chars, host on the
+        // safe-domain list), and at most once.
+        String safeUrl = SecurityUtil.checkRedirectURL(url);
+        if (null == safeUrl) {
+            return;
+        }
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                res.sendRedirect(safeUrl);
+                return;
             }
         }
 

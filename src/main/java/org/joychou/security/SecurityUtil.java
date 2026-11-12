@@ -160,6 +160,60 @@ public class SecurityUtil {
 
 
     /**
+     * Whether the value is a same-site relative path such as <code>/a/b?c=d</code>. Protocol-relative
+     * (<code>//host</code>), backslash forms (<code>/\host</code>), control characters and anything
+     * that is not a well-formed URI reference are rejected, so browsers cannot treat it as another host.
+     */
+    private static boolean isRelativePath(String url) {
+        if (null == url || !url.startsWith("/") || url.startsWith("//") || url.indexOf('\\') != -1) {
+            return false;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            if (Character.isISOControl(url.charAt(i))) {
+                return false;
+            }
+        }
+        try {
+            URI uri = new URI(url);
+            return null == uri.getScheme() && null == uri.getRawAuthority();
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
+
+    /**
+     * Validate a request-supplied redirect target (CWE-601). Only a same-site relative path or an
+     * absolute http/https url whose host passes {@link #checkURL(String)} (the safe-domain list in
+     * url/url_safe_domain.xml) is accepted.
+     *
+     * @param url the untrusted redirect target
+     * @return the original url if it may be redirected to; null otherwise (callers must fail closed)
+     */
+    public static String checkRedirectURL(String url) {
+        if (null == url) {
+            return null;
+        }
+        if (isRelativePath(url)) {
+            return url;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            if (Character.isISOControl(url.charAt(i)) || url.indexOf('\\') != -1) {
+                return null;
+            }
+        }
+        try {
+            if (null != new URI(url).getRawUserInfo()) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return checkURL(url);
+    }
+
+
+    /**
      * Validate a user supplied JDBC url before connecting. Only plain
      * <code>jdbc:postgresql://host[:port]/db</code> and <code>jdbc:db2://host[:port]/db</code> urls are accepted,
      * the host must be a public one, and only a small set of harmless postgresql query parameters is allowed
