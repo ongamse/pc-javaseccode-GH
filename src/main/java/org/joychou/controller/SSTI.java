@@ -15,13 +15,17 @@ import java.io.StringWriter;
 public class SSTI {
 
     /**
-     * SSTI of Java velocity. The latest Velocity version still has this problem.
-     * Fix method: Avoid to use Velocity.evaluate method.
-     * <p>
-     * http://localhost:8080/ssti/velocity?template=%23set($e=%22e%22);$e.getClass().forName(%22java.lang.Runtime%22).getMethod(%22getRuntime%22,null).invoke(null,null).exec(%22open%20-a%20Calculator%22)
-     * Open a calculator in MacOS.
+     * Fixed, server-defined template. Request data must never be used as template source.
+     */
+    private static final String FIXED_TEMPLATE =
+            "Author: $author, Address: $address, Phone: $phone, Input: $!userInput";
+
+    /**
+     * Velocity rendering with a fixed template. The request parameter is passed only
+     * as a context variable, so it is treated as data and not evaluated as a template
+     * (prevents SSTI).
      *
-     * @param template exp
+     * @param template user supplied value, rendered as plain data
      */
     @GetMapping("/velocity")
     public void velocity(String template) {
@@ -32,8 +36,11 @@ public class SSTI {
         context.put("author", "Elliot A.");
         context.put("address", "217 E Broadway");
         context.put("phone", "555-1337");
+        // Untrusted input is only ever a context value; Velocity does not
+        // re-evaluate context values as template source.
+        context.put("userInput", template);
 
         StringWriter swOut = new StringWriter();
-        Velocity.evaluate(context, swOut, "test", template);
+        Velocity.evaluate(context, swOut, "test", FIXED_TEMPLATE);
     }
 }
