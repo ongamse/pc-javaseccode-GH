@@ -364,6 +364,29 @@ public class SecurityUtil {
         return sb.toString();
     }
 
+    /**
+     * Make a request-derived value safe to be written into an HTTP response header
+     * (CWE-113): removes CR, LF and every other ISO control character (including DEL)
+     * so the value cannot terminate the header line or split the response.
+     * Null stays null so callers keep their existing "no value" behavior.
+     *
+     * @param value the untrusted header value
+     * @return the value without control characters, or null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (null == value) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
     public static void main(String[] args) {
     }
 
