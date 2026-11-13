@@ -12,12 +12,17 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "hostname", "uname", "pwd", "date"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -205,6 +210,25 @@ public class SecurityUtil {
         }
 
         return input;
+    }
+
+
+    /**
+     * Resolve a user supplied command name into an argv array for ProcessBuilder (no shell).
+     * Only allowlisted, argument-less, read-only commands are accepted.
+     *
+     * @param cmd user supplied command
+     * @return argv array, or null if the command is not allowlisted
+     */
+    public static String[] cmdArgv(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String name = cmd.trim();
+        if (!ALLOWED_COMMANDS.contains(name)) {
+            return null;
+        }
+        return new String[]{name};
     }
 
 
