@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
@@ -23,6 +24,9 @@ public class SecurityUtil {
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
             Arrays.asList("whoami", "id", "hostname", "uname", "pwd", "date"));
+    private static final Set<String> ALLOWED_JDBC_PROPERTIES = new HashSet<String>(
+            Arrays.asList("ssl", "sslmode", "connecttimeout", "logintimeout", "sockettimeout",
+                    "currentschema", "applicationname"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -153,6 +157,92 @@ public class SecurityUtil {
         }
         return !SSRFChecker.isInternalIpByUrl(url);
     }
+
+    /**
+     * Validate an outbound http/https URL before the server requests it.
+     * The scheme must be http or https, and every address the host resolves to must be
+     * a public address (not loopback, link-local, site-local, multicast, any-local or
+     * in the configured SSRF block subnets).
+     *
+     * @param url the url that needs to check
+     * @throws IOException if the url is not allowed
+     */
+    public static void assertSafeOutboundUrl(String url) throws IOException {
+        if (url == null || !isHttp(url)) {
+            throw new IOException("[-] SSRF check failed");
+        }
+        String host;
+        try {
+            host = new URI(url).getHost();
+        } catch (URISyntaxException e) {
+            throw new IOException("[-] SSRF check failed");
+        }
+        assertSafeOutboundHost(host);
+        if (SSRFChecker.isInternalIpByUrl(url)) {
+            throw new IOException("[-] SSRF check failed");
+        }
+    }
+
+
+    /**
+     * Validate that a host only resolves to public addresses.
+     *
+     * @param host host name or ip
+     * @throws IOException if the host is not allowed
+     */
+    public static void assertSafeOutboundHost(String host) throws IOException {
+        if (host == null || host.isEmpty()) {
+            throw new IOException("[-] SSRF check failed");
+        }
+        InetAddress[] addresses = InetAddress.getAllByName(host);
+        for (InetAddress address : addresses) {
+            if (address.isAnyLocalAddress() || address.isLoopbackAddress()
+                    || address.isLinkLocalAddress() || address.isSiteLocalAddress()
+                    || address.isMulticastAddress()
+                    || SSRFChecker.isInternalIp(address.getHostAddress())) {
+                throw new IOException("[-] SSRF check failed");
+            }
+        }
+    }
+
+
+    /**
+     * Validate a user supplied JDBC url before it is passed to DriverManager.
+     * The url must use the expected driver prefix, point at a public host, and may only carry
+     * allowlisted, non-class-loading connection properties.
+     *
+     * @param jdbcUrl url such as <code>jdbc:postgresql://host:5432/db</code>
+     * @param prefix  required url prefix, such as <code>jdbc:postgresql://</code>
+     * @throws IOException if the url is not allowed
+     */
+    public static void assertSafeJdbcUrl(String jdbcUrl, String prefix) throws IOException {
+        if (jdbcUrl == null || !jdbcUrl.startsWith(prefix)) {
+            throw new IOException("[-] SSRF check failed");
+        }
+        // jdbc:<driver>://host:port/db -> <driver>://host:port/db
+        URI uri;
+        try {
+            uri = new URI(jdbcUrl.substring("jdbc:".length()));
+        } catch (URISyntaxException e) {
+            throw new IOException("[-] SSRF check failed");
+        }
+        assertSafeOutboundHost(uri.getHost());
+
+        String query = uri.getRawQuery();
+        if (query != null) {
+            for (String pair : query.split("&")) {
+                String key = pair.split("=", 2)[0];
+                if (!ALLOWED_JDBC_PROPERTIES.contains(key.toLowerCase())) {
+                    throw new IOException("[-] SSRF check failed");
+                }
+            }
+        }
+        // db2 style properties (jdbc:db2://host:port/db:key=value;) are not allowed
+        if (jdbcUrl.indexOf(';') != -1 || (query == null && jdbcUrl.indexOf('=') != -1)) {
+            throw new IOException("[-] SSRF check failed");
+        }
+    }
+
 
     /**
      * Check ssrf by hook socket. Start socket hook.
