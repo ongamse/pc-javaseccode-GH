@@ -1,5 +1,6 @@
 package org.joychou.controller;
 
+import org.springframework.web.util.HtmlUtils;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 
@@ -131,7 +132,7 @@ public class Jsonp {
 
         String callback = request.getParameter("fastjsonpCallback");
         if (StringUtils.isNotBlank(callback)) {
-            JSONPObject jsonpObj = new JSONPObject(callback);
+            JSONPObject jsonpObj = new JSONPObject(HtmlUtils.htmlEscape(callback));
             jsonpObj.addParameter(csrfToken);
             return jsonpObj.toString();
         } else {
