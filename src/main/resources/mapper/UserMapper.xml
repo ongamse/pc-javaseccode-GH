@@ -14,7 +14,7 @@
     <!--</select>-->
 
     <select id="findByUserNameVuln02" parameterType="String" resultMap="User">
-        select * from users where username like concat('%', #{_parameter}, '%')
+        select * from users where username = #{_parameter}
     </select>
 
     <!-- ORDER BY cannot be bound as a parameter, so only fixed, allowlisted columns are emitted. -->
