@@ -45,9 +45,14 @@ public class OriginFilter implements Filter {
             return;
         }
 
-        response.setHeader("Access-Control-Allow-Origin", SecurityUtil.stripHeaderControlChars(origin));
-        response.setHeader("Access-Control-Allow-Credentials", "true");
-        response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTION");
+        // 只有通过白名单校验的origin才会被设置到响应头；无origin（同域请求）不设置cors头。
+        String safeOrigin = SecurityUtil.checkCorsOrigin(origin);
+        if (safeOrigin != null) {
+            response.setHeader("Access-Control-Allow-Origin", safeOrigin);
+            response.setHeader("Access-Control-Allow-Credentials", "true");
+            response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTION");
+            response.addHeader("Vary", "Origin");
+        }
 
         filterChain.doFilter(req, res);
     }

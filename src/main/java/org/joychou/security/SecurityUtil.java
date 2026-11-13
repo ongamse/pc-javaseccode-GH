@@ -385,6 +385,39 @@ public class SecurityUtil {
         return sb.toString();
     }
 
+    /**
+     * Validate a request Origin against the configured safe domains (see {@link #checkURL(String)})
+     * and return the canonical origin (scheme://host[:port]) that may be echoed in
+     * Access-Control-Allow-Origin. An Origin never carries userinfo, path, query or fragment,
+     * so anything with those parts is rejected.
+     *
+     * @param origin value of the Origin request header, may be null
+     * @return the safe origin, or null when the origin is missing or not allowed
+     */
+    public static String checkCorsOrigin(String origin) {
+        if (checkURL(origin) == null) {
+            return null;
+        }
+        try {
+            URI uri = new URI(origin);
+            if (uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+                return null;
+            }
+            String path = uri.getRawPath();
+            if (path != null && !path.isEmpty()) {
+                return null;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append(uri.getScheme().toLowerCase()).append("://").append(uri.getHost().toLowerCase());
+            if (uri.getPort() != -1) {
+                sb.append(':').append(uri.getPort());
+            }
+            return sb.toString();
+        } catch (URISyntaxException | NullPointerException e) {
+            return null;
+        }
+    }
+
     public static void main(String[] args) {
     }
 
