@@ -8,16 +8,25 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "hostname", "uname", "pwd", "date"));
+    private static final Set<String> ALLOWED_JDBC_PROPERTIES = new HashSet<String>(
+            Arrays.asList("ssl", "sslmode", "connecttimeout", "logintimeout", "sockettimeout",
+                    "currentschema", "applicationname"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -150,6 +159,92 @@ public class SecurityUtil {
     }
 
     /**
+     * Validate an outbound http/https URL before the server requests it.
+     * The scheme must be http or https, and every address the host resolves to must be
+     * a public address (not loopback, link-local, site-local, multicast, any-local or
+     * in the configured SSRF block subnets).
+     *
+     * @param url the url that needs to check
+     * @throws IOException if the url is not allowed
+     */
+    public static void assertSafeOutboundUrl(String url) throws IOException {
+        if (url == null || !isHttp(url)) {
+            throw new IOException("[-] SSRF check failed");
+        }
+        String host;
+        try {
+            host = new URI(url).getHost();
+        } catch (URISyntaxException e) {
+            throw new IOException("[-] SSRF check failed");
+        }
+        assertSafeOutboundHost(host);
+        if (SSRFChecker.isInternalIpByUrl(url)) {
+            throw new IOException("[-] SSRF check failed");
+        }
+    }
+
+
+    /**
+     * Validate that a host only resolves to public addresses.
+     *
+     * @param host host name or ip
+     * @throws IOException if the host is not allowed
+     */
+    public static void assertSafeOutboundHost(String host) throws IOException {
+        if (host == null || host.isEmpty()) {
+            throw new IOException("[-] SSRF check failed");
+        }
+        InetAddress[] addresses = InetAddress.getAllByName(host);
+        for (InetAddress address : addresses) {
+            if (address.isAnyLocalAddress() || address.isLoopbackAddress()
+                    || address.isLinkLocalAddress() || address.isSiteLocalAddress()
+                    || address.isMulticastAddress()
+                    || SSRFChecker.isInternalIp(address.getHostAddress())) {
+                throw new IOException("[-] SSRF check failed");
+            }
+        }
+    }
+
+
+    /**
+     * Validate a user supplied JDBC url before it is passed to DriverManager.
+     * The url must use the expected driver prefix, point at a public host, and may only carry
+     * allowlisted, non-class-loading connection properties.
+     *
+     * @param jdbcUrl url such as <code>jdbc:postgresql://host:5432/db</code>
+     * @param prefix  required url prefix, such as <code>jdbc:postgresql://</code>
+     * @throws IOException if the url is not allowed
+     */
+    public static void assertSafeJdbcUrl(String jdbcUrl, String prefix) throws IOException {
+        if (jdbcUrl == null || !jdbcUrl.startsWith(prefix)) {
+            throw new IOException("[-] SSRF check failed");
+        }
+        // jdbc:<driver>://host:port/db -> <driver>://host:port/db
+        URI uri;
+        try {
+            uri = new URI(jdbcUrl.substring("jdbc:".length()));
+        } catch (URISyntaxException e) {
+            throw new IOException("[-] SSRF check failed");
+        }
+        assertSafeOutboundHost(uri.getHost());
+
+        String query = uri.getRawQuery();
+        if (query != null) {
+            for (String pair : query.split("&")) {
+                String key = pair.split("=", 2)[0];
+                if (!ALLOWED_JDBC_PROPERTIES.contains(key.toLowerCase())) {
+                    throw new IOException("[-] SSRF check failed");
+                }
+            }
+        }
+        // db2 style properties (jdbc:db2://host:port/db:key=value;) are not allowed
+        if (jdbcUrl.indexOf(';') != -1 || (query == null && jdbcUrl.indexOf('=') != -1)) {
+            throw new IOException("[-] SSRF check failed");
+        }
+    }
+
+
+    /**
      * Check ssrf by hook socket. Start socket hook.
      *
      * @author liergou @ 2020-04-04 02:15
@@ -209,6 +304,25 @@ public class SecurityUtil {
 
 
     /**
+     * Resolve a user supplied command name into an argv array for ProcessBuilder (no shell).
+     * Only allowlisted, argument-less, read-only commands are accepted.
+     *
+     * @param cmd user supplied command
+     * @return argv array, or null if the command is not allowlisted
+     */
+    public static String[] cmdArgv(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String name = cmd.trim();
+        if (!ALLOWED_COMMANDS.contains(name)) {
+            return null;
+        }
+        return new String[]{name};
+    }
+
+
+    /**
      * 过滤mybatis中order by不能用#的情况。
      * 严格限制用户输入只能包含<code>a-zA-Z0-9_-.</code>字符。
      *
@@ -247,6 +361,61 @@ public class SecurityUtil {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Remove CR/LF and other ASCII control characters so the value can be safely
+     * placed into an HTTP response header (prevents header injection / response splitting).
+     *
+     * @param value untrusted header value, may be null
+     * @return the value without control characters, or null when input is null
+     */
+    public static String stripHeaderControlChars(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (ch < 0x20 && ch != '\t' || ch == 0x7f) {
+                continue;
+            }
+            sb.append(ch);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Validate a request Origin against the configured safe domains (see {@link #checkURL(String)})
+     * and return the canonical origin (scheme://host[:port]) that may be echoed in
+     * Access-Control-Allow-Origin. An Origin never carries userinfo, path, query or fragment,
+     * so anything with those parts is rejected.
+     *
+     * @param origin value of the Origin request header, may be null
+     * @return the safe origin, or null when the origin is missing or not allowed
+     */
+    public static String checkCorsOrigin(String origin) {
+        if (checkURL(origin) == null) {
+            return null;
+        }
+        try {
+            URI uri = new URI(origin);
+            if (uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+                return null;
+            }
+            String path = uri.getRawPath();
+            if (path != null && !path.isEmpty()) {
+                return null;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append(uri.getScheme().toLowerCase()).append("://").append(uri.getHost().toLowerCase());
+            if (uri.getPort() != -1) {
+                sb.append(':').append(uri.getPort());
+            }
+            return sb.toString();
+        } catch (URISyntaxException | NullPointerException e) {
+            return null;
+        }
     }
 
     public static void main(String[] args) {

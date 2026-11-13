@@ -1,7 +1,20 @@
 package org.joychou.controller;
 
 import com.thoughtworks.xstream.XStream;
+import com.thoughtworks.xstream.io.HierarchicalStreamReader;
+import com.thoughtworks.xstream.io.StreamException;
 import com.thoughtworks.xstream.io.xml.DomDriver;
+import com.thoughtworks.xstream.io.xml.DomReader;
+import com.thoughtworks.xstream.security.NoTypePermission;
+import com.thoughtworks.xstream.security.NullPermission;
+import com.thoughtworks.xstream.security.PrimitiveTypePermission;
+import org.w3c.dom.Document;
+import org.xml.sax.InputSource;
+
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.InputStream;
+import java.io.Reader;
 import org.joychou.dao.User;
 import org.joychou.util.WebUtils;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,9 +36,44 @@ public class XStreamRce {
     @PostMapping("/xstream")
     public String parseXml(HttpServletRequest request) throws Exception {
         String xml = WebUtils.getRequestBody(request);
-        XStream xstream = new XStream(new DomDriver());
+        XStream xstream = new XStream(new SecureDomDriver());
+        // Allowlist (XStream security framework): deny everything, then permit only the expected types.
+        xstream.addPermission(NoTypePermission.NONE);
+        xstream.addPermission(NullPermission.NULL);
+        xstream.addPermission(PrimitiveTypePermission.PRIMITIVES);
+        xstream.allowTypes(new Class[]{User.class, String.class, Integer.class});
         xstream.fromXML(xml);
         return "xstream";
+    }
+
+    /**
+     * DomDriver that parses with a DocumentBuilder which rejects DOCTYPE and external entities (XXE).
+     */
+    private static class SecureDomDriver extends DomDriver {
+        @Override
+        public HierarchicalStreamReader createReader(Reader in) {
+            return new DomReader(parseSecurely(new InputSource(in)));
+        }
+
+        @Override
+        public HierarchicalStreamReader createReader(InputStream in) {
+            return new DomReader(parseSecurely(new InputSource(in)));
+        }
+
+        private static Document parseSecurely(InputSource source) {
+            try {
+                DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+                dbf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+                dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+                dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                dbf.setXIncludeAware(false);
+                dbf.setExpandEntityReferences(false);
+                return dbf.newDocumentBuilder().parse(source);
+            } catch (Exception e) {
+                throw new StreamException(e);
+            }
+        }
     }
 
     public static void main(String[] args) {
