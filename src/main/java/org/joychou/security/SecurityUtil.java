@@ -8,16 +8,26 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern CMD_ARG_PATTERN = Pattern.compile("^[a-zA-Z0-9_=.-]+$");
+    private static final Pattern JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:(postgresql|db2)://([a-zA-Z0-9.-]+(?::[0-9]{1,5})?)/[a-zA-Z0-9_]+$");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "date", "hostname", "uname", "pwd", "uptime"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -29,6 +39,63 @@ public class SecurityUtil {
      */
     public static boolean isHttp(String url) {
         return url.startsWith("http://") || url.startsWith("https://");
+    }
+
+
+    /**
+     * Validate a user supplied URL before the server issues a request to it.
+     * The URL must be http/https, have a host, and every address the host
+     * resolves to must be a public address (no loopback, link-local, private,
+     * any-local, multicast or configured blocked subnet; this also covers the
+     * cloud metadata address 169.254.169.254).
+     *
+     * @param url url that the server is about to request
+     * @return true if the URL may be requested, false otherwise
+     */
+    public static boolean isSafeRemoteUrl(String url) {
+        if (url == null || !isHttp(url)) {
+            return false;
+        }
+        try {
+            String host = new URI(url).getHost();
+            if (host == null || host.isEmpty()) {
+                return false;
+            }
+            if (SSRFChecker.isInternalIpByUrl(url)) {
+                return false;
+            }
+            for (InetAddress addr : InetAddress.getAllByName(host)) {
+                if (addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                        || addr.isSiteLocalAddress() || addr.isMulticastAddress()) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("SSRF check failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+
+    /**
+     * Validate a JDBC url decoded from user input. Only
+     * <code>jdbc:&lt;subprotocol&gt;://host[:port]/database</code> is accepted: no query string,
+     * no driver properties (e.g. socketFactory / sslfactory gadgets), and the host must be public.
+     *
+     * @param jdbcUrl     the jdbc url
+     * @param subprotocol allowed subprotocol, e.g. postgresql or db2
+     * @return true if the url is allowed
+     */
+    public static boolean isSafeJdbcUrl(String jdbcUrl, String subprotocol) {
+        if (jdbcUrl == null || subprotocol == null) {
+            return false;
+        }
+        Matcher m = JDBC_URL_PATTERN.matcher(jdbcUrl);
+        if (!m.matches() || !subprotocol.equals(m.group(1))) {
+            return false;
+        }
+        return isSafeRemoteUrl("http://" + m.group(2) + "/");
     }
 
 
@@ -209,6 +276,30 @@ public class SecurityUtil {
 
 
     /**
+     * Parse a user supplied command line into an argv array for ProcessBuilder (no shell).
+     * Only allowlisted executables are accepted and every argument must match a strict pattern.
+     *
+     * @param cmd command line, e.g. "whoami"
+     * @return argv array, or null if the command is not permitted
+     */
+    public static String[] safeCommand(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!CMD_ARG_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
+    }
+
+
+    /**
      * 过滤mybatis中order by不能用#的情况。
      * 严格限制用户输入只能包含<code>a-zA-Z0-9_-.</code>字符。
      *
@@ -247,6 +338,99 @@ public class SecurityUtil {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Check that a value can be placed in an HTTP response header without CRLF injection.
+     * Rejects CR, LF and NUL, both raw and after (repeated) URL decoding such as %0d / %0a.
+     *
+     * @param value header value, null is treated as safe (containers ignore null headers)
+     * @return true if the value contains no header-splitting characters
+     */
+    public static boolean isSafeHeaderValue(String value) {
+        if (value == null) {
+            return true;
+        }
+        String current = value;
+        // Check raw value, then up to two rounds of URL decoding (handles double encoding).
+        for (int i = 0; i < 3; i++) {
+            if (containsHeaderBreak(current)) {
+                return false;
+            }
+            try {
+                String decoded = URLDecoder.decode(current, "UTF-8");
+                if (decoded.equals(current)) {
+                    break;
+                }
+                current = decoded;
+            } catch (IllegalArgumentException | UnsupportedEncodingException e) {
+                // Malformed escape sequence: nothing further to decode, raw value was already checked.
+                break;
+            }
+        }
+        return !containsHeaderBreak(current);
+    }
+
+    /**
+     * Validate an absolute redirect target. It must be http/https, pass {@link #checkURL(String)}
+     * (safe/block domain lists), be strictly parseable (so backslash and whitespace tricks that
+     * browsers normalise into a different host are rejected), carry no userinfo, and contain no
+     * header-splitting characters.
+     *
+     * @param url redirect target taken from user input
+     * @return true if the server may redirect to this absolute URL
+     */
+    public static boolean isSafeAbsoluteRedirectUrl(String url) {
+        if (url == null || !isSafeHeaderValue(url) || hasUnsafeRedirectChars(url)) {
+            return false;
+        }
+        try {
+            URI uri = new URI(url);
+            if (uri.getHost() == null || uri.getUserInfo() != null) {
+                return false;
+            }
+        } catch (URISyntaxException e) {
+            return false;
+        }
+        return checkURL(url) != null;
+    }
+
+
+    /**
+     * Validate a same-site relative redirect path such as <code>/home?a=b</code>. Protocol-relative
+     * (<code>//host</code>), backslash (<code>/\host</code>) and scheme-bearing targets are rejected.
+     *
+     * @param url redirect target taken from user input
+     * @return true if the value is a safe same-site path
+     */
+    public static boolean isSafeRelativeRedirectPath(String url) {
+        if (url == null || !isSafeHeaderValue(url) || hasUnsafeRedirectChars(url)) {
+            return false;
+        }
+        if (!url.startsWith("/") || url.startsWith("//")) {
+            return false;
+        }
+        try {
+            URI uri = new URI(url);
+            return uri.getScheme() == null && uri.getHost() == null && uri.getAuthority() == null;
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
+
+    private static boolean hasUnsafeRedirectChars(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' || c <= ' ' || c == 0x7f) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsHeaderBreak(String s) {
+        return s.indexOf('\r') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\0') >= 0;
     }
 
     public static void main(String[] args) {

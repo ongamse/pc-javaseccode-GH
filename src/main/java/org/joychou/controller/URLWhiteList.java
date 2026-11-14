@@ -5,6 +5,7 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.util.HtmlUtils;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -100,7 +101,15 @@ public class URLWhiteList {
 
         logger.info("url:  " + url);
 
-        if (!SecurityUtil.isHttp(url)) {
+        // http/https only, and the host must not resolve to an internal address.
+        if (!SecurityUtil.isSafeRemoteUrl(url)) {
+            return;
+        }
+
+        // Strict parse (no backslash/userinfo/control chars) and safe/block domain lists
+        // before the URL is ever used as a redirect target.
+        if (!SecurityUtil.isSafeAbsoluteRedirectUrl(url)) {
+            res.setStatus(HttpServletResponse.SC_FORBIDDEN);
             return;
         }
 
@@ -112,6 +121,7 @@ public class URLWhiteList {
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
                 res.sendRedirect(url);
+                return;
             }
         }
 
@@ -135,9 +145,9 @@ public class URLWhiteList {
 
         for (String whiteHost: whiteDomainlists){
             if (whiteHost.startsWith(".") && host.endsWith(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             } else if (!whiteHost.startsWith(".") && host.equals(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             }
         }
 
