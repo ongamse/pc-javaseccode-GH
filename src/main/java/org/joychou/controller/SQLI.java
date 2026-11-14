@@ -9,7 +9,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.security.access.AccessDeniedException;
+
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+import java.security.Principal;
 import java.sql.*;
 import java.util.List;
 
@@ -93,8 +97,9 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/sec?username=joychou">http://localhost:8080/sqli/jdbc/sec?username=joychou</a>
      */
     @RequestMapping("/jdbc/sec")
-    public String jdbc_sqli_sec(@RequestParam("username") String username) {
+    public String jdbc_sqli_sec(HttpServletRequest request, @RequestParam("username") String username) {
 
+        requireOwnerOrAdmin(request, username);
         StringBuilder result = new StringBuilder();
         try {
             Class.forName(driver);
@@ -181,7 +186,8 @@ public class SQLI {
      * <p>select * from users where username = 'joychou' or '1'='1' </p>
      */
     @GetMapping("/mybatis/vuln01")
-    public List<User> mybatisVuln01(@RequestParam("username") String username) {
+    public List<User> mybatisVuln01(HttpServletRequest request, @RequestParam("username") String username) {
+        requireOwnerOrAdmin(request, username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -191,7 +197,8 @@ public class SQLI {
      * <p>select * from users where username like '%joychou' or '1'='1%' </p>
      */
     @GetMapping("/mybatis/vuln02")
-    public List<User> mybatisVuln02(@RequestParam("username") String username) {
+    public List<User> mybatisVuln02(HttpServletRequest request, @RequestParam("username") String username) {
+        requireOwnerOrAdmin(request, username);
         return userMapper.findByUserNameVuln02(username);
     }
 
@@ -223,7 +230,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec01?username=joychou">http://localhost:8080/sqli/mybatis/sec01?username=joychou</a>
      */
     @GetMapping("/mybatis/sec01")
-    public User mybatisSec01(@RequestParam("username") String username) {
+    public User mybatisSec01(HttpServletRequest request, @RequestParam("username") String username) {
+        requireOwnerOrAdmin(request, username);
         return userMapper.findByUserName(username);
     }
 
@@ -232,8 +240,29 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec02?id=1">http://localhost:8080/sqli/mybatis/sec02?id=1</a>
      */
     @GetMapping("/mybatis/sec02")
-    public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+    public User mybatisSec02(HttpServletRequest request, @RequestParam("id") Integer id) {
+        User found = userMapper.findById(id);
+        if (found != null) {
+            requireOwnerOrAdmin(request, found.getUsername());
+        }
+        return found;
+    }
+
+    /**
+     * Authorize a client-supplied user reference against the authenticated principal.
+     * Only the owner of the record or an ADMIN may look it up; otherwise fail closed (403).
+     */
+    private static void requireOwnerOrAdmin(HttpServletRequest request, String username) {
+        Principal principal = request.getUserPrincipal();
+        if (principal == null) {
+            throw new AccessDeniedException("Authentication required");
+        }
+        if (request.isUserInRole("ADMIN")) {
+            return;
+        }
+        if (username == null || !principal.getName().equals(username)) {
+            throw new AccessDeniedException("Not allowed to access another user's data");
+        }
     }
 
 
