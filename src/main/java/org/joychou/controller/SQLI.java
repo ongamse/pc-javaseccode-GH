@@ -61,10 +61,11 @@ public class SQLI {
                 System.out.println("Connect to database successfully.");
 
             // sqli vuln code
-            Statement statement = con.createStatement();
-            String sql = "select * from users where username = '" + username + "'";
-            logger.info(sql);
-            ResultSet rs = statement.executeQuery(sql);
+            String sql = "select * from users where username = ?";
+            PreparedStatement statement = con.prepareStatement(sql);
+            statement.setString(1, username);
+            logger.info(statement.toString());
+            ResultSet rs = statement.executeQuery();
 
             while (rs.next()) {
                 String res_name = rs.getString("username");
@@ -146,8 +147,9 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connecting to Database successfully.");
 
-            String sql = "select * from users where username = '" + username + "'";
+            String sql = "select * from users where username = ?";
             PreparedStatement st = con.prepareStatement(sql);
+            st.setString(1, username);
 
             logger.info(st.toString());
             ResultSet rs = st.executeQuery();
@@ -200,7 +202,19 @@ public class SQLI {
      */
     @GetMapping("/mybatis/orderby/vuln03")
     public List<User> mybatisVuln03(@RequestParam("sort") String sort) {
-        return userMapper.findByUserNameVuln03(sort);
+        return userMapper.findByUserNameVuln03(allowedSortColumn(sort));
+    }
+
+    /**
+     * Allowlist of columns usable in ORDER BY (identifiers cannot be bound with #{}).
+     *
+     * @return the matching column name, or null if not allowed
+     */
+    private static String allowedSortColumn(String sort) {
+        if ("id".equals(sort) || "username".equals(sort) || "password".equals(sort)) {
+            return sort;
+        }
+        return null;
     }
 
 
@@ -239,7 +253,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/orderby/sec04")
     public List<User> mybatisOrderBySec04(@RequestParam("sort") String sort) {
-        return userMapper.findByUserNameVuln03(SecurityUtil.sqlFilter(sort));
+        return userMapper.findByUserNameVuln03(allowedSortColumn(SecurityUtil.sqlFilter(sort)));
     }
 
 }
