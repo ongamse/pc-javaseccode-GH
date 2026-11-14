@@ -7,10 +7,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 
 @RestController
@@ -40,9 +41,31 @@ public class PathTraversal {
         logger.info("Working directory: " + System.getProperty("user.dir"));
         logger.info("File path: " + imgFile);
 
-        File f = new File(imgFile);
-        if (f.exists() && !f.isDirectory()) {
-            byte[] data = Files.readAllBytes(Paths.get(imgFile));
+        if (imgFile == null) {
+            return "Illegal file path.";
+        }
+
+        // Confine reads to the working directory: resolve, normalize and verify containment.
+        Path base = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        Path resolved;
+        try {
+            resolved = base.resolve(imgFile).normalize();
+        } catch (InvalidPathException e) {
+            return "Illegal file path.";
+        }
+        if (!resolved.startsWith(base)) {
+            logger.info("Illegal file path: " + imgFile);
+            return "Illegal file path.";
+        }
+
+        if (Files.exists(resolved) && !Files.isDirectory(resolved)) {
+            // Resolve symlinks and re-check containment.
+            Path real = resolved.toRealPath();
+            if (!real.startsWith(base.toRealPath())) {
+                logger.info("Illegal file path: " + imgFile);
+                return "Illegal file path.";
+            }
+            byte[] data = Files.readAllBytes(real);
             return new String(Base64.encodeBase64(data));
         } else {
             return "File doesn't exist or is not a file.";
