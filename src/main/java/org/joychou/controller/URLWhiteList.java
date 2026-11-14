@@ -106,6 +106,13 @@ public class URLWhiteList {
             return;
         }
 
+        // Strict parse (no backslash/userinfo/control chars) and safe/block domain lists
+        // before the URL is ever used as a redirect target.
+        if (!SecurityUtil.isSafeAbsoluteRedirectUrl(url)) {
+            res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
+
         URL u = new URL(url);
         String host = u.getHost();
         logger.info("host:  " + host);
@@ -114,6 +121,7 @@ public class URLWhiteList {
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
                 res.sendRedirect(url);
+                return;
             }
         }
 

@@ -371,6 +371,64 @@ public class SecurityUtil {
         return !containsHeaderBreak(current);
     }
 
+    /**
+     * Validate an absolute redirect target. It must be http/https, pass {@link #checkURL(String)}
+     * (safe/block domain lists), be strictly parseable (so backslash and whitespace tricks that
+     * browsers normalise into a different host are rejected), carry no userinfo, and contain no
+     * header-splitting characters.
+     *
+     * @param url redirect target taken from user input
+     * @return true if the server may redirect to this absolute URL
+     */
+    public static boolean isSafeAbsoluteRedirectUrl(String url) {
+        if (url == null || !isSafeHeaderValue(url) || hasUnsafeRedirectChars(url)) {
+            return false;
+        }
+        try {
+            URI uri = new URI(url);
+            if (uri.getHost() == null || uri.getUserInfo() != null) {
+                return false;
+            }
+        } catch (URISyntaxException e) {
+            return false;
+        }
+        return checkURL(url) != null;
+    }
+
+
+    /**
+     * Validate a same-site relative redirect path such as <code>/home?a=b</code>. Protocol-relative
+     * (<code>//host</code>), backslash (<code>/\host</code>) and scheme-bearing targets are rejected.
+     *
+     * @param url redirect target taken from user input
+     * @return true if the value is a safe same-site path
+     */
+    public static boolean isSafeRelativeRedirectPath(String url) {
+        if (url == null || !isSafeHeaderValue(url) || hasUnsafeRedirectChars(url)) {
+            return false;
+        }
+        if (!url.startsWith("/") || url.startsWith("//")) {
+            return false;
+        }
+        try {
+            URI uri = new URI(url);
+            return uri.getScheme() == null && uri.getHost() == null && uri.getAuthority() == null;
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
+
+    private static boolean hasUnsafeRedirectChars(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' || c <= ' ' || c == 0x7f) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean containsHeaderBreak(String s) {
         return s.indexOf('\r') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\0') >= 0;
     }
