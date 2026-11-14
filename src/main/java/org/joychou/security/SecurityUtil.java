@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
@@ -15,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
@@ -22,6 +24,8 @@ public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
     private static final Pattern CMD_ARG_PATTERN = Pattern.compile("^[a-zA-Z0-9_=.-]+$");
+    private static final Pattern JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:(postgresql|db2)://([a-zA-Z0-9.-]+(?::[0-9]{1,5})?)/[a-zA-Z0-9_]+$");
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
             Arrays.asList("whoami", "id", "date", "hostname", "uname", "pwd", "uptime"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
@@ -35,6 +39,63 @@ public class SecurityUtil {
      */
     public static boolean isHttp(String url) {
         return url.startsWith("http://") || url.startsWith("https://");
+    }
+
+
+    /**
+     * Validate a user supplied URL before the server issues a request to it.
+     * The URL must be http/https, have a host, and every address the host
+     * resolves to must be a public address (no loopback, link-local, private,
+     * any-local, multicast or configured blocked subnet; this also covers the
+     * cloud metadata address 169.254.169.254).
+     *
+     * @param url url that the server is about to request
+     * @return true if the URL may be requested, false otherwise
+     */
+    public static boolean isSafeRemoteUrl(String url) {
+        if (url == null || !isHttp(url)) {
+            return false;
+        }
+        try {
+            String host = new URI(url).getHost();
+            if (host == null || host.isEmpty()) {
+                return false;
+            }
+            if (SSRFChecker.isInternalIpByUrl(url)) {
+                return false;
+            }
+            for (InetAddress addr : InetAddress.getAllByName(host)) {
+                if (addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                        || addr.isSiteLocalAddress() || addr.isMulticastAddress()) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("SSRF check failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+
+    /**
+     * Validate a JDBC url decoded from user input. Only
+     * <code>jdbc:&lt;subprotocol&gt;://host[:port]/database</code> is accepted: no query string,
+     * no driver properties (e.g. socketFactory / sslfactory gadgets), and the host must be public.
+     *
+     * @param jdbcUrl     the jdbc url
+     * @param subprotocol allowed subprotocol, e.g. postgresql or db2
+     * @return true if the url is allowed
+     */
+    public static boolean isSafeJdbcUrl(String jdbcUrl, String subprotocol) {
+        if (jdbcUrl == null || subprotocol == null) {
+            return false;
+        }
+        Matcher m = JDBC_URL_PATTERN.matcher(jdbcUrl);
+        if (!m.matches() || !subprotocol.equals(m.group(1))) {
+            return false;
+        }
+        return isSafeRemoteUrl("http://" + m.group(2) + "/");
     }
 
 

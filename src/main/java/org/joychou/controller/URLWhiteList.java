@@ -101,7 +101,8 @@ public class URLWhiteList {
 
         logger.info("url:  " + url);
 
-        if (!SecurityUtil.isHttp(url)) {
+        // http/https only, and the host must not resolve to an internal address.
+        if (!SecurityUtil.isSafeRemoteUrl(url)) {
             return;
         }
 
