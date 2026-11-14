@@ -340,6 +340,41 @@ public class SecurityUtil {
         return sb.toString();
     }
 
+    /**
+     * Check that a value can be placed in an HTTP response header without CRLF injection.
+     * Rejects CR, LF and NUL, both raw and after (repeated) URL decoding such as %0d / %0a.
+     *
+     * @param value header value, null is treated as safe (containers ignore null headers)
+     * @return true if the value contains no header-splitting characters
+     */
+    public static boolean isSafeHeaderValue(String value) {
+        if (value == null) {
+            return true;
+        }
+        String current = value;
+        // Check raw value, then up to two rounds of URL decoding (handles double encoding).
+        for (int i = 0; i < 3; i++) {
+            if (containsHeaderBreak(current)) {
+                return false;
+            }
+            try {
+                String decoded = URLDecoder.decode(current, "UTF-8");
+                if (decoded.equals(current)) {
+                    break;
+                }
+                current = decoded;
+            } catch (IllegalArgumentException | UnsupportedEncodingException e) {
+                // Malformed escape sequence: nothing further to decode, raw value was already checked.
+                break;
+            }
+        }
+        return !containsHeaderBreak(current);
+    }
+
+    private static boolean containsHeaderBreak(String s) {
+        return s.indexOf('\r') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\0') >= 0;
+    }
+
     public static void main(String[] args) {
     }
 

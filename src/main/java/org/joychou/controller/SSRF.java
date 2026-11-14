@@ -122,6 +122,8 @@ public class SSRF {
         OutputStream outputStream = null;
         try {
             String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
+            // Keep only filename-safe characters so the value can never split the header (CRLF injection).
+            downLoadImgFileName = downLoadImgFileName.replaceAll("[^A-Za-z0-9._-]", "_");
             // download
             response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
 
