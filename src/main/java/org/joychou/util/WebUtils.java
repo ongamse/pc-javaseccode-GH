@@ -5,7 +5,6 @@ import javax.servlet.http.HttpServletRequest;
 import java.io.*;
 
 import com.google.common.base.Preconditions;
-import org.springframework.web.util.HtmlUtils;
 
 public class WebUtils {
 
@@ -27,8 +26,22 @@ public class WebUtils {
     }
 
 
+    private static final java.util.regex.Pattern JSONP_CALLBACK = java.util.regex.Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$.]{0,127}$");
+
+    /**
+     * Return the callback only if it is a plain JavaScript identifier path (e.g. foo or a.b), otherwise null.
+     */
+    public static String safeJsonpCallback(String callback) {
+        return callback != null && JSONP_CALLBACK.matcher(callback).matches() ? callback : null;
+    }
+
     public static String json2Jsonp(String callback, String jsonStr) {
-        return HtmlUtils.htmlEscape(callback) + "(" + jsonStr + ")";
+        String safeCallback = safeJsonpCallback(callback);
+        if (safeCallback == null) {
+            // No usable callback: return plain JSON, never attacker-controlled script text.
+            return jsonStr;
+        }
+        return safeCallback + "(" + jsonStr + ")";
     }
 
 

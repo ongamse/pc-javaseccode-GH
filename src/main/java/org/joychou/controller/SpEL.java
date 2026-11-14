@@ -10,6 +10,7 @@ import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 
 import java.util.Collections;
 
@@ -49,7 +50,7 @@ public class SpEL {
         ExpressionParser parser = new SpelExpressionParser();
         try {
             Object value = parser.parseExpression(expression).getValue(restrictedContext());
-            return String.valueOf(value);
+            return HtmlUtils.htmlEscape(String.valueOf(value));
         } catch (EvaluationException e) {
             return "Bad expression.";
         }

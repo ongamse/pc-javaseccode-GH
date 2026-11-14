@@ -129,7 +129,7 @@ public class Jsonp {
     public String getCsrfToken2(HttpServletRequest request) {
         CsrfToken csrfToken = cookieCsrfTokenRepository.loadToken(request); // get csrf token
 
-        String callback = request.getParameter("fastjsonpCallback");
+        String callback = WebUtils.safeJsonpCallback(request.getParameter("fastjsonpCallback"));
         if (StringUtils.isNotBlank(callback)) {
             JSONPObject jsonpObj = new JSONPObject(callback);
             jsonpObj.addParameter(csrfToken);
