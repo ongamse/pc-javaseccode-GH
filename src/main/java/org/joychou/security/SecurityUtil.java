@@ -12,12 +12,19 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern HOST_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$");
+    private static final Set<String> ALLOWED_COMMANDS = Collections.unmodifiableSet(
+            new HashSet<String>(Arrays.asList("whoami", "id", "date", "hostname", "uname", "uptime", "pwd", "ls")));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -200,11 +207,48 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+    /**
+     * Parse a user supplied command line into an argv array for a process that is started
+     * WITHOUT a shell. The executable must be in a fixed allowlist and every argument must
+     * only contain <code>a-zA-Z0-9_/.-</code>.
+     *
+     * @param cmd command line, e.g. "ls -la /tmp"
+     * @return argv array, or null when the command is not allowed
+     */
+    public static String[] safeCommand(String cmd) {
+        if (null == cmd || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (cmdFilter(argv[i]) == null) {
+                return null;
+            }
+        }
+        return argv;
+    }
+
+    /**
+     * Validate a host[:port] value (for example a Host header) before it is used as a process argument.
+     *
+     * @param host host or host:port
+     * @return the host when valid, otherwise null
+     */
+    public static String hostFilter(String host) {
+        if (null == host || !HOST_PATTERN.matcher(host).matches()) {
+            return null;
+        }
+        return host;
     }
 
 
