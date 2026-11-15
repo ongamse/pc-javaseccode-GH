@@ -160,6 +160,41 @@ public class SecurityUtil {
 
 
     /**
+     * Validate an untrusted redirect target. Two forms are accepted:
+     * <ul>
+     *   <li>a relative same-site path: exactly one leading '/', not followed by '/' or '\', no scheme,
+     *       no host, no user info and no characters that are illegal in a URI (this also rejects
+     *       control characters, so the value cannot break a Location header);</li>
+     *   <li>an absolute http(s) url whose host passes {@link #checkURL(String)} (safe domain allowlist
+     *       and block list from url/url_safe_domain.xml).</li>
+     * </ul>
+     *
+     * @param url the untrusted redirect target
+     * @return the original url when it is a safe redirect target, otherwise null
+     */
+    public static String checkRedirectURL(String url) {
+        if (null == url) {
+            return null;
+        }
+        if (url.startsWith("/")) {
+            if (url.startsWith("//") || url.indexOf('\\') != -1 || url.length() > 2048) {
+                return null;
+            }
+            try {
+                URI uri = new URI(url);
+                if (null != uri.getScheme() || null != uri.getRawAuthority() || null != uri.getHost()) {
+                    return null;
+                }
+                return url;
+            } catch (URISyntaxException e) {
+                return null;
+            }
+        }
+        return checkURL(url);
+    }
+
+
+    /**
      * 通过自定义白名单域名处理SSRF漏洞。如果URL范围收敛，强烈建议使用该方案。
      * 这是最简单也最有效的修复方式。因为SSRF都是发起URL请求时造成，大多数场景是图片场景，一般图片的域名都是CDN或者OSS等，所以限定域名白名单即可完成SSRF漏洞修复。
      *

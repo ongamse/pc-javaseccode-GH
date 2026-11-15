@@ -109,9 +109,15 @@ public class URLWhiteList {
         logger.info("host:  " + host);
 
         // endsWith .
+        // The redirect target must additionally pass the project safe-domain allowlist / block list.
+        String safeUrl = SecurityUtil.checkURL(url);
+        if (safeUrl == null) {
+            return;
+        }
+
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                res.sendRedirect(safeUrl);
                 return;
             }
         }
