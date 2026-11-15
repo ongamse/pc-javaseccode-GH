@@ -7,10 +7,16 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -100,6 +106,8 @@ public class SQLI {
     @RequestMapping("/jdbc/sec")
     public String jdbc_sqli_sec(@RequestParam("username") String username) {
 
+        requireOwnerOrAdmin(username);
+
         StringBuilder result = new StringBuilder();
         try {
             Class.forName(driver);
@@ -187,6 +195,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln01")
     public List<User> mybatisVuln01(@RequestParam("username") String username) {
+        requireOwnerOrAdmin(username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -197,7 +206,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln02")
     public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+        return onlyAuthorized(userMapper.findByUserNameVuln02(username));
     }
 
     /**
@@ -229,6 +238,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec01")
     public User mybatisSec01(@RequestParam("username") String username) {
+        requireOwnerOrAdmin(username);
         return userMapper.findByUserName(username);
     }
 
@@ -238,7 +248,71 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec02")
     public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+        User found = userMapper.findById(id);
+        // Fail closed: a missing record and a record owned by someone else are indistinguishable to non-admins.
+        if (found == null) {
+            if (!isAdmin(SecurityContextHolder.getContext().getAuthentication())) {
+                throw new AccessDeniedException("Access is denied");
+            }
+            return null;
+        }
+        requireOwnerOrAdmin(found.getUsername());
+        return found;
+    }
+
+    /**
+     * Object-level authorization: the authenticated caller may only reference their own user record,
+     * unless they hold ROLE_ADMIN. Fails closed (AccessDeniedException -> HTTP 403) when there is no
+     * authenticated caller or the requested reference belongs to someone else.
+     */
+    private static void requireOwnerOrAdmin(String requestedUsername) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (!isAuthenticated(auth)) {
+            throw new AccessDeniedException("Access is denied");
+        }
+        if (isAdmin(auth)) {
+            return;
+        }
+        if (requestedUsername == null || !requestedUsername.equals(auth.getName())) {
+            throw new AccessDeniedException("Access is denied");
+        }
+    }
+
+    /**
+     * Keeps only the records the caller is authorized to see (all for ROLE_ADMIN, otherwise own record).
+     */
+    private static List<User> onlyAuthorized(List<User> users) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (!isAuthenticated(auth)) {
+            throw new AccessDeniedException("Access is denied");
+        }
+        if (users == null || isAdmin(auth)) {
+            return users;
+        }
+        List<User> allowed = new ArrayList<>();
+        for (User u : users) {
+            if (u != null && auth.getName().equals(u.getUsername())) {
+                allowed.add(u);
+            }
+        }
+        return allowed;
+    }
+
+    private static boolean isAuthenticated(Authentication auth) {
+        return auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken)
+                && auth.getName() != null;
+    }
+
+    private static boolean isAdmin(Authentication auth) {
+        if (!isAuthenticated(auth)) {
+            return false;
+        }
+        for (GrantedAuthority authority : auth.getAuthorities()) {
+            if ("ROLE_ADMIN".equals(authority.getAuthority())) {
+                return true;
+            }
+        }
+        return false;
     }
 
 
