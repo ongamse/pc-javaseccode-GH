@@ -2,6 +2,7 @@ package org.joychou.security;
 
 import org.joychou.config.WebConfig;
 import org.joychou.security.ssrf.SSRFChecker;
+import org.joychou.security.ssrf.SSRFException;
 import org.joychou.security.ssrf.SocketHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,12 +13,25 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern HOST_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$");
+    private static final Set<String> ALLOWED_COMMANDS = Collections.unmodifiableSet(
+            new HashSet<String>(Arrays.asList("whoami", "id", "date", "hostname", "uname", "uptime", "pwd", "ls")));
+    private static final Pattern JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:([a-z0-9]+)://([a-zA-Z0-9][a-zA-Z0-9.-]*)(:[0-9]{1,5})?/([a-zA-Z0-9_.-]+)(?:\\?([a-zA-Z0-9_.=&-]*))?$");
+    private static final Pattern JDBC_PARAM_VALUE_PATTERN = Pattern.compile("^[a-zA-Z0-9_.-]+$");
+    private static final Set<String> JDBC_SAFE_PARAMS = Collections.unmodifiableSet(new HashSet<String>(
+            Arrays.asList("ssl", "sslmode", "connectTimeout", "loginTimeout", "socketTimeout", "applicationName")));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -41,10 +55,54 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
-        } catch (URISyntaxException e) {
+            String host = uri.getHost();
+            if (null == host || null != uri.getRawUserInfo()) {
+                return "";
+            }
+            return host.toLowerCase();
+        } catch (URISyntaxException | NullPointerException e) {
             return "";
         }
+    }
+
+
+    /**
+     * Validate a JDBC url that is derived from user input before it is passed to
+     * {@link java.sql.DriverManager#getConnection(String)}.
+     * Only <code>jdbc:&lt;subprotocol&gt;://host[:port]/database</code> is accepted: the scheme is fixed,
+     * the host must not resolve to an internal address, there is no user info and only a small allowlist
+     * of harmless driver parameters is accepted (so autoDeserialize, allowLoadLocalInfile, socketFactory,
+     * sslfactory, loggerFile, ... are rejected).
+     *
+     * @param jdbcUrl     the jdbc url that needs to check
+     * @param subProtocol the expected sub protocol, e.g. postgresql or db2
+     * @return the original url when it is safe, otherwise null
+     */
+    public static String checkJdbcUrl(String jdbcUrl, String subProtocol) {
+        if (null == jdbcUrl || null == subProtocol) {
+            return null;
+        }
+        Matcher m = JDBC_URL_PATTERN.matcher(jdbcUrl);
+        if (!m.matches() || !subProtocol.equals(m.group(1))) {
+            return null;
+        }
+        String query = m.group(5);
+        if (null != query) {
+            for (String param : query.split("&", -1)) {
+                int idx = param.indexOf('=');
+                if (idx <= 0 || !JDBC_PARAM_VALUE_PATTERN.matcher(param.substring(idx + 1)).matches()
+                        || !JDBC_SAFE_PARAMS.contains(param.substring(0, idx))) {
+                    return null;
+                }
+            }
+        }
+        try {
+            SSRFChecker.assertSafeHost(m.group(2));
+        } catch (SSRFException e) {
+            logger.error(e.getMessage());
+            return null;
+        }
+        return jdbcUrl;
     }
 
 
@@ -98,6 +156,41 @@ public class SecurityUtil {
             logger.error(e.toString());
             return null;
         }
+    }
+
+
+    /**
+     * Validate an untrusted redirect target. Two forms are accepted:
+     * <ul>
+     *   <li>a relative same-site path: exactly one leading '/', not followed by '/' or '\', no scheme,
+     *       no host, no user info and no characters that are illegal in a URI (this also rejects
+     *       control characters, so the value cannot break a Location header);</li>
+     *   <li>an absolute http(s) url whose host passes {@link #checkURL(String)} (safe domain allowlist
+     *       and block list from url/url_safe_domain.xml).</li>
+     * </ul>
+     *
+     * @param url the untrusted redirect target
+     * @return the original url when it is a safe redirect target, otherwise null
+     */
+    public static String checkRedirectURL(String url) {
+        if (null == url) {
+            return null;
+        }
+        if (url.startsWith("/")) {
+            if (url.startsWith("//") || url.indexOf('\\') != -1 || url.length() > 2048) {
+                return null;
+            }
+            try {
+                URI uri = new URI(url);
+                if (null != uri.getScheme() || null != uri.getRawAuthority() || null != uri.getHost()) {
+                    return null;
+                }
+                return url;
+            } catch (URISyntaxException e) {
+                return null;
+            }
+        }
+        return checkURL(url);
     }
 
 
@@ -199,12 +292,116 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Make an untrusted value safe to be written into an HTTP response header (prevents CRLF / header
+     * injection and response splitting). Every ISO control character (CR, LF, NUL, TAB, DEL, ...)
+     * is removed.
+     *
+     * @param value untrusted header value, may be null
+     * @return the value without control characters, or null when value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (null == value) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+
+    /**
+     * Resolve the value that may be echoed in Access-Control-Allow-Origin for a request Origin header.
+     * Only an origin that passes {@link #checkURL(String)} (safe domain allowlist and block list) and
+     * contains no control characters is returned. Never a wildcard and never an unvalidated value.
+     *
+     * @param origin the request Origin header, may be null
+     * @return the allowlisted origin, or null when the origin is absent or not allowed
+     */
+    public static String getAllowedCorsOrigin(String origin) {
+        if (null == origin || checkURL(origin) == null) {
+            return null;
+        }
+        String clean = sanitizeHeaderValue(origin);
+        return clean.equals(origin) ? clean : null;
+    }
+
+
+    /**
+     * Make an untrusted URL safe to be written into an HTTP response header such as Location.
+     * Control characters are removed and every character that is not printable ASCII (spaces,
+     * non-ASCII characters) is percent-encoded as UTF-8, so the result can never break the header line.
+     *
+     * @param url untrusted url, may be null
+     * @return header safe url, or null when url is null
+     */
+    public static String sanitizeHeaderUrl(String url) {
+        String clean = sanitizeHeaderValue(url);
+        if (null == clean) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(clean.length());
+        for (byte b : clean.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            int c = b & 0xff;
+            if (c > 0x20 && c < 0x7f) {
+                sb.append((char) c);
+            } else {
+                sb.append('%').append(Character.toUpperCase(Character.forDigit(c >> 4, 16)))
+                        .append(Character.toUpperCase(Character.forDigit(c & 0xf, 16)));
+            }
+        }
+        return sb.toString();
+    }
+
+
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+    /**
+     * Parse a user supplied command line into an argv array for a process that is started
+     * WITHOUT a shell. The executable must be in a fixed allowlist and every argument must
+     * only contain <code>a-zA-Z0-9_/.-</code>.
+     *
+     * @param cmd command line, e.g. "ls -la /tmp"
+     * @return argv array, or null when the command is not allowed
+     */
+    public static String[] safeCommand(String cmd) {
+        if (null == cmd || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (cmdFilter(argv[i]) == null) {
+                return null;
+            }
+        }
+        return argv;
+    }
+
+    /**
+     * Validate a host[:port] value (for example a Host header) before it is used as a process argument.
+     *
+     * @param host host or host:port
+     * @return the host when valid, otherwise null
+     */
+    public static String hostFilter(String host) {
+        if (null == host || !HOST_PATTERN.matcher(host).matches()) {
+            return null;
+        }
+        return host;
     }
 
 

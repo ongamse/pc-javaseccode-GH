@@ -1,13 +1,20 @@
 package org.joychou.controller;
 
 import com.thoughtworks.xstream.XStream;
+import com.thoughtworks.xstream.io.HierarchicalStreamReader;
+import com.thoughtworks.xstream.io.StreamException;
 import com.thoughtworks.xstream.io.xml.DomDriver;
+import com.thoughtworks.xstream.io.xml.DomReader;
 import org.joychou.dao.User;
 import org.joychou.util.WebUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.xml.sax.InputSource;
 
 import javax.servlet.http.HttpServletRequest;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.Reader;
 
 
 @RestController
@@ -23,9 +30,35 @@ public class XStreamRce {
     @PostMapping("/xstream")
     public String parseXml(HttpServletRequest request) throws Exception {
         String xml = WebUtils.getRequestBody(request);
-        XStream xstream = new XStream(new DomDriver());
+        XStream xstream = new XStream(new SecureDomDriver());
+        // Deny everything by default, then allow only the expected type.
+        XStream.setupDefaultSecurity(xstream);
+        xstream.allowTypes(new Class[]{User.class});
         xstream.fromXML(xml);
         return "xstream";
+    }
+
+    /**
+     * DomDriver that parses with a DocumentBuilder which rejects DOCTYPE and
+     * external entities (XXE hardening).
+     */
+    private static class SecureDomDriver extends DomDriver {
+        @Override
+        public HierarchicalStreamReader createReader(Reader xml) {
+            try {
+                DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+                dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+                dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                dbf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+                dbf.setXIncludeAware(false);
+                dbf.setExpandEntityReferences(false);
+                DocumentBuilder db = dbf.newDocumentBuilder();
+                return new DomReader(db.parse(new InputSource(xml)));
+            } catch (Exception e) {
+                throw new StreamException(e);
+            }
+        }
     }
 
     public static void main(String[] args) {

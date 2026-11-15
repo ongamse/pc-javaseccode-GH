@@ -6,4 +6,5 @@ docker/
 poc/
 src/main/java/org/joychou/test/
 *.iml
+.env
 docker_jdk_build.sh
