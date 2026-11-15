@@ -3,9 +3,9 @@ package org.joychou.util;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import java.io.*;
+import java.util.regex.Pattern;
 
 import com.google.common.base.Preconditions;
-import org.springframework.web.util.HtmlUtils;
 
 public class WebUtils {
 
@@ -27,8 +27,23 @@ public class WebUtils {
     }
 
 
+    // A JSONP callback must be a plain JavaScript identifier path such as "cb" or "window.cb".
+    private static final Pattern JSONP_CALLBACK_PATTERN =
+            Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*){0,4}$");
+
+    public static boolean isValidJsonpCallback(String callback) {
+        return callback != null && callback.length() <= 64 && JSONP_CALLBACK_PATTERN.matcher(callback).matches();
+    }
+
+    /**
+     * Build a JSONP response. The callback is validated against an identifier allowlist
+     * (HTML escaping is not a valid JavaScript-context encoding); invalid callbacks are rejected.
+     */
     public static String json2Jsonp(String callback, String jsonStr) {
-        return HtmlUtils.htmlEscape(callback) + "(" + jsonStr + ")";
+        if (!isValidJsonpCallback(callback)) {
+            return "error";
+        }
+        return callback + "(" + jsonStr + ")";
     }
 
 
