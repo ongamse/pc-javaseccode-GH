@@ -4,6 +4,7 @@ import com.auth0.jwt.JWT;
 import com.auth0.jwt.JWTVerifier;
 import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.exceptions.JWTVerificationException;
+import com.auth0.jwt.interfaces.DecodedJWT;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
@@ -70,25 +71,36 @@ public class JwtUtils {
      * @return Valid token returns true. Invalid token returns false.
      */
     public static Boolean verifyTokenByJavaJwt(String token) {
+        return verifyAndDecodeByJavaJwt(token) != null;
+    }
+
+    /**
+     * Verify the signature (HMAC256) and registered claims of the token and return the verified
+     * token. Claims must only be read from the returned object, never from an unverified decode.
+     *
+     * @param token token
+     * @return the verified token, or null if the token is invalid.
+     */
+    private static DecodedJWT verifyAndDecodeByJavaJwt(String token) {
         try {
             Algorithm algorithm = Algorithm.HMAC256(SECRET);
             JWTVerifier verifier = JWT.require(algorithm).build();
-            verifier.verify(token);
-            return true;
+            return verifier.verify(token);
         } catch (JWTVerificationException exception){
             log.error(exception.toString());
-            return false;
+            return null;
         }
     }
 
 
     public static String getNicknameByJavaJwt(String token) {
-        // If the signature is not verified, there will be security issues.
-        if (!verifyTokenByJavaJwt(token)) {
+        // Only read claims from the token returned by the verifier (signature already checked).
+        DecodedJWT verified = verifyAndDecodeByJavaJwt(token);
+        if (verified == null) {
             log.error("token is invalid");
             return null;
         }
-        return JWT.decode(token).getClaim("nickname").asString();
+        return verified.getClaim("nickname").asString();
     }
 
 
