@@ -316,6 +316,23 @@ public class SecurityUtil {
 
 
     /**
+     * Resolve the value that may be echoed in Access-Control-Allow-Origin for a request Origin header.
+     * Only an origin that passes {@link #checkURL(String)} (safe domain allowlist and block list) and
+     * contains no control characters is returned. Never a wildcard and never an unvalidated value.
+     *
+     * @param origin the request Origin header, may be null
+     * @return the allowlisted origin, or null when the origin is absent or not allowed
+     */
+    public static String getAllowedCorsOrigin(String origin) {
+        if (null == origin || checkURL(origin) == null) {
+            return null;
+        }
+        String clean = sanitizeHeaderValue(origin);
+        return clean.equals(origin) ? clean : null;
+    }
+
+
+    /**
      * Make an untrusted URL safe to be written into an HTTP response header such as Location.
      * Control characters are removed and every character that is not printable ASCII (spaces,
      * non-ASCII characters) is percent-encoded as UTF-8, so the result can never break the header line.

@@ -20,11 +20,14 @@ public class CustomCorsConfig extends WebMvcRegistrationsAdapter {
         return new WebMvcConfigurerAdapter() {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
-                // 为了支持一级域名，重写了checkOrigin
-                //String[] allowOrigins = {"joychou.org", "http://test.joychou.me"};
+                // 为了支持一级域名，重写了checkOrigin (CustomCorsProcessor also accepts SecurityUtil.checkURL domains)
+                // Explicit origins are required: without them Spring defaults to "*", which combined
+                // with allowCredentials(true) would reflect any request origin.
+                String[] allowOrigins = {"joychou.org", "http://test.joychou.me"};
                 registry.addMapping("/cors/sec/webMvcConfigurer") // /**表示所有路由path
-                        //.allowedOrigins(allowOrigins)
+                        .allowedOrigins(allowOrigins)
                         .allowedMethods("GET", "POST")
+                        .allowedHeaders("Content-Type", "X-Requested-With", "Accept")
                         .allowCredentials(true);
             }
         };
