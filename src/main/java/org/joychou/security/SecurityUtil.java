@@ -257,6 +257,56 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Make an untrusted value safe to be written into an HTTP response header (prevents CRLF / header
+     * injection and response splitting). Every ISO control character (CR, LF, NUL, TAB, DEL, ...)
+     * is removed.
+     *
+     * @param value untrusted header value, may be null
+     * @return the value without control characters, or null when value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (null == value) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+
+    /**
+     * Make an untrusted URL safe to be written into an HTTP response header such as Location.
+     * Control characters are removed and every character that is not printable ASCII (spaces,
+     * non-ASCII characters) is percent-encoded as UTF-8, so the result can never break the header line.
+     *
+     * @param url untrusted url, may be null
+     * @return header safe url, or null when url is null
+     */
+    public static String sanitizeHeaderUrl(String url) {
+        String clean = sanitizeHeaderValue(url);
+        if (null == clean) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(clean.length());
+        for (byte b : clean.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            int c = b & 0xff;
+            if (c > 0x20 && c < 0x7f) {
+                sb.append((char) c);
+            } else {
+                sb.append('%').append(Character.toUpperCase(Character.forDigit(c >> 4, 16)))
+                        .append(Character.toUpperCase(Character.forDigit(c & 0xf, 16)));
+            }
+        }
+        return sb.toString();
+    }
+
+
     public static String cmdFilter(String input) {
         if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
