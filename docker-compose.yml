@@ -6,10 +6,17 @@ services:
         ports:
             - "8080:8080"
             - "8000:8000"
+        environment:
+            # Values come from the shell environment or an untracked .env file; never commit them.
+            - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
+            - JSC_ACCESS_KEY_ID=${JSC_ACCESS_KEY_ID:?JSC_ACCESS_KEY_ID must be set}
+            - JSC_ACCESS_KEY_SECRET=${JSC_ACCESS_KEY_SECRET:?JSC_ACCESS_KEY_SECRET must be set}
         links:
             - j_mysql
 
     j_mysql:
         image: joychou/jsc_mysql:latest
+        environment:
+            - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
         ports:
             - "3306:3306"
