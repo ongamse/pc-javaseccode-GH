@@ -43,8 +43,13 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
-        } catch (URISyntaxException e) {
+            String host = uri.getHost();
+            if (host == null) {
+                // No parsable host (e.g. "http:///x"): fail closed with an empty host.
+                return "";
+            }
+            return host.toLowerCase();
+        } catch (URISyntaxException | NullPointerException e) {
             return "";
         }
     }

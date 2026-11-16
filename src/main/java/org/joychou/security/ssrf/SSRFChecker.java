@@ -93,7 +93,9 @@ public class SSRFChecker {
             } while (connection.getResponseCode() != HttpURLConnection.HTTP_OK);
             connection.disconnect();
         } catch (Exception e) {
-            return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
+            // Fail closed: if the URL (or a redirect hop) cannot be verified, treat it as unsafe.
+            logger.error("[-] SSRF check failed with exception: " + e.getMessage());
+            return false;
         }
         return true; // 默认返回true
     }
@@ -292,7 +294,9 @@ public class SSRFChecker {
             // use URI instead of URL
             URI u = new URI(url);
             if (SecurityUtil.isHttp(url)) {
-                return u.getHost();
+                String host = u.getHost();
+                // A URI without a parsable host is treated as illegal (fail closed).
+                return host == null ? "" : host;
             }
             return "";
         } catch (Exception e) {
