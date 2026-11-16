@@ -1,5 +1,6 @@
 package org.joychou.controller;
 
+import org.springframework.web.util.HtmlUtils;
 import com.fasterxml.uuid.Generators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,7 +60,7 @@ public class FileUpload {
         try {
             // Get the file and save it somewhere
             byte[] bytes = file.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + file.getOriginalFilename());
+            Path path = resolveUploadPath(file.getOriginalFilename());
             Files.write(path, bytes);
 
             redirectAttributes.addFlashAttribute("message",
@@ -141,7 +142,7 @@ public class FileUpload {
         try {
             // Get the file and save it somewhere
             byte[] bytes = multifile.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + multifile.getOriginalFilename());
+            Path path = resolveUploadPath(multifile.getOriginalFilename());
             Files.write(path, bytes);
         } catch (IOException e) {
             logger.error(e.toString());
@@ -151,11 +152,39 @@ public class FileUpload {
 
         logger.info("[+] Safe file. Suffix: {}, MIME: {}", Suffix, mimeType);
         logger.info("[+] Successfully uploaded {}", filePath);
-        return String.format("You successfully uploaded '%s'", filePath);
+        return HtmlUtils.htmlEscape(String.format("You successfully uploaded '%s'", filePath));
+    }
+
+    /**
+     * Resolve a file name against the upload folder and make sure the result is a
+     * direct child of that folder (rejects "..", separators and absolute paths).
+     */
+    private static Path resolveUploadPath(String fileName) throws IOException {
+        if (fileName == null || fileName.isEmpty()) {
+            throw new IOException("Illegal file name");
+        }
+        Path base = Paths.get(UPLOADED_FOLDER).toAbsolutePath().normalize();
+        Path target = base.resolve(fileName).normalize();
+        if (!base.equals(target.getParent())) {
+            throw new IOException("Illegal file path");
+        }
+        return target;
     }
 
     private void deleteFile(String filePath) {
-        File delFile = new File(filePath);
+        File delFile;
+        try {
+            Path base = Paths.get(UPLOADED_FOLDER).toAbsolutePath().normalize();
+            Path target = Paths.get(filePath).toAbsolutePath().normalize();
+            if (!base.equals(target.getParent())) {
+                logger.info(filePath + " delete failed!");
+                return;
+            }
+            delFile = target.toFile();
+        } catch (RuntimeException e) {
+            logger.info(filePath + " delete failed!");
+            return;
+        }
         if(delFile.isFile() && delFile.exists()) {
             if (delFile.delete()) {
                 logger.info("[+] " + filePath + " delete successfully!");
@@ -175,9 +204,9 @@ public class FileUpload {
         String fileName = multiFile.getOriginalFilename();
         String suffix = fileName.substring(fileName.lastIndexOf("."));
         UUID uuid = Generators.timeBasedGenerator().generate();
-        randomFilePath = UPLOADED_FOLDER + uuid + suffix;
         // 随机生成一个同后缀名的文件
-        File convFile = new File(randomFilePath);
+        File convFile = resolveUploadPath(uuid + suffix).toFile();
+        randomFilePath = convFile.getPath();
         boolean ret = convFile.createNewFile();
         if (!ret) {
             return null;

@@ -1,6 +1,7 @@
 package org.joychou.controller;
 
 
+import org.springframework.web.util.HtmlUtils;
 import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,7 +9,6 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -104,14 +104,19 @@ public class URLWhiteList {
             return;
         }
 
-        URL u = new URL(url);
-        String host = u.getHost();
+        // Strict RFC 3986 parsing: backslash/userinfo tricks fail closed to an empty host.
+        String host = SecurityUtil.gethost(url);
         logger.info("host:  " + host);
 
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                // Also enforce the shared trusted-domain allowlist / blocklist before redirecting.
+                String safeUrl = SecurityUtil.checkURL(url);
+                if (safeUrl != null) {
+                    res.sendRedirect(safeUrl);
+                }
+                return;
             }
         }
 
@@ -135,9 +140,9 @@ public class URLWhiteList {
 
         for (String whiteHost: whiteDomainlists){
             if (whiteHost.startsWith(".") && host.endsWith(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             } else if (!whiteHost.startsWith(".") && host.equals(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             }
         }
 

@@ -18,6 +18,9 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern HEADER_CONTROL_CHARS = Pattern.compile("[\\p{Cntrl}&&[^\\t]]");
+    private static final java.util.Set<String> CMD_ALLOWLIST = new java.util.HashSet<String>(
+            java.util.Arrays.asList("whoami", "id", "hostname", "uname", "pwd", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -41,8 +44,13 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
-        } catch (URISyntaxException e) {
+            String host = uri.getHost();
+            if (host == null) {
+                // No parsable host (e.g. "http:///x"): fail closed with an empty host.
+                return "";
+            }
+            return host.toLowerCase();
+        } catch (URISyntaxException | NullPointerException e) {
             return "";
         }
     }
@@ -199,12 +207,51 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Neutralize header injection (CRLF) by removing CR, LF and other ASCII control
+     * characters (horizontal tab is kept) from a value that is written to an HTTP header.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null stays null
+     */
+    public static String cRlfReplace(String value) {
+        if (value == null) {
+            return null;
+        }
+        return HEADER_CONTROL_CHARS.matcher(value).replaceAll("");
+    }
+
+
     public static String cmdFilter(String input) {
         if (!FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Parse a user supplied command line into an argv array for ProcessBuilder (never a shell).
+     * The program must be on a fixed allowlist and every argument must match FILTER_PATTERN.
+     *
+     * @param cmd user supplied command line, e.g. "ls -la /tmp"
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] cmdArgv(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (!CMD_ALLOWLIST.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!FILTER_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
     }
 
 
