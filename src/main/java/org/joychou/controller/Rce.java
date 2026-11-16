@@ -133,7 +133,8 @@ public class Rce {
      */
     @GetMapping("/vuln/yarm")
     public void yarm(String content) {
-        Yaml y = new Yaml();
+        // SafeConstructor only builds plain maps/lists/scalars; arbitrary Java types are rejected
+        Yaml y = new Yaml(new SafeConstructor());
         y.load(content);
     }
 
