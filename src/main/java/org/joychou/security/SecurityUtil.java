@@ -18,6 +18,7 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern HEADER_CONTROL_CHARS = Pattern.compile("[\\p{Cntrl}&&[^\\t]]");
     private static final java.util.Set<String> CMD_ALLOWLIST = new java.util.HashSet<String>(
             java.util.Arrays.asList("whoami", "id", "hostname", "uname", "pwd", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
@@ -203,6 +204,21 @@ public class SecurityUtil {
         }
 
         return filepath;
+    }
+
+
+    /**
+     * Neutralize header injection (CRLF) by removing CR, LF and other ASCII control
+     * characters (horizontal tab is kept) from a value that is written to an HTTP header.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null stays null
+     */
+    public static String cRlfReplace(String value) {
+        if (value == null) {
+            return null;
+        }
+        return HEADER_CONTROL_CHARS.matcher(value).replaceAll("");
     }
 
 
