@@ -12,6 +12,7 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
 import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
+import org.joychou.security.SecurityUtil;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.slf4j.Logger;
@@ -178,6 +179,11 @@ public class HttpUtils {
      */
     public static void imageIO(String url) {
         try {
+            // Only remote http(s) images; reject file:, jar:, etc. to prevent local file reads.
+            if (url == null || !SecurityUtil.isHttp(url.toLowerCase())) {
+                logger.error("Illegal image url scheme");
+                return;
+            }
             URL u = new URL(url);
             ImageIO.read(u); // send request
         } catch (IOException e) {
