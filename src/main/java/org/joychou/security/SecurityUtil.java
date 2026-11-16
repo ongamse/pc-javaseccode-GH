@@ -18,6 +18,8 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final java.util.Set<String> CMD_ALLOWLIST = new java.util.HashSet<String>(
+            java.util.Arrays.asList("whoami", "id", "hostname", "uname", "pwd", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -205,6 +207,30 @@ public class SecurityUtil {
         }
 
         return input;
+    }
+
+
+    /**
+     * Parse a user supplied command line into an argv array for ProcessBuilder (never a shell).
+     * The program must be on a fixed allowlist and every argument must match FILTER_PATTERN.
+     *
+     * @param cmd user supplied command line, e.g. "ls -la /tmp"
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] cmdArgv(String cmd) {
+        if (cmd == null) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (!CMD_ALLOWLIST.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!FILTER_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
     }
 
 
