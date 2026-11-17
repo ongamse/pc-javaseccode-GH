@@ -12,12 +12,17 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(
+            Arrays.asList("whoami", "pwd", "date", "hostname", "uname", "id", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -205,6 +210,30 @@ public class SecurityUtil {
         }
 
         return input;
+    }
+
+
+    /**
+     * Build a shell-free argv from a user supplied command line.
+     * The program must be on a fixed allowlist and every argument must pass {@link #cmdFilter(String)}.
+     *
+     * @param cmd command line, e.g. <code>ls -la /tmp</code>
+     * @return argv array to pass to ProcessBuilder / Runtime.exec(String[]); null if not allowed
+     */
+    public static String[] cmdArgv(String cmd) {
+        if (null == cmd) {
+            return null;
+        }
+        String[] tokens = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(tokens[0])) {
+            return null;
+        }
+        for (int i = 1; i < tokens.length; i++) {
+            if (null == cmdFilter(tokens[i])) {
+                return null;
+            }
+        }
+        return tokens;
     }
 
 

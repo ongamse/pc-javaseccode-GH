@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
+import org.joychou.security.SecurityUtil;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -33,8 +34,13 @@ public class Rce {
         Runtime run = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder();
 
+        String[] argv = SecurityUtil.cmdArgv(cmd);
+        if (null == argv) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            Process p = run.exec(cmd);
+            Process p = run.exec(argv);
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -65,8 +71,12 @@ public class Rce {
 
         StringBuilder sb = new StringBuilder();
 
+        String[] arrCmd = SecurityUtil.cmdArgv(cmd);
+        if (null == arrCmd) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
             ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
