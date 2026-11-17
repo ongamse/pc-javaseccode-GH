@@ -2,9 +2,11 @@ package org.joychou.controller;
 
 import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
+import org.joychou.security.SecurityUtil;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
@@ -33,8 +35,13 @@ public class Rce {
         Runtime run = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder();
 
+        String[] argv = SecurityUtil.cmdArgv(cmd);
+        if (null == argv) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            Process p = run.exec(cmd);
+            Process p = run.exec(argv);
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -51,9 +58,9 @@ public class Rce {
             inBr.close();
             in.close();
         } catch (Exception e) {
-            return e.toString();
+            return HtmlUtils.htmlEscape(e.toString());
         }
-        return sb.toString();
+        return HtmlUtils.htmlEscape(sb.toString());
     }
 
 
@@ -65,8 +72,12 @@ public class Rce {
 
         StringBuilder sb = new StringBuilder();
 
+        String[] arrCmd = SecurityUtil.cmdArgv(cmd);
+        if (null == arrCmd) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
             ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
@@ -77,10 +88,10 @@ public class Rce {
                 sb.append(tmpStr);
             }
         } catch (Exception e) {
-            return e.toString();
+            return HtmlUtils.htmlEscape(e.toString());
         }
 
-        return sb.toString();
+        return HtmlUtils.htmlEscape(sb.toString());
     }
 
 
@@ -110,7 +121,8 @@ public class Rce {
      */
     @GetMapping("/vuln/yarm")
     public void yarm(String content) {
-        Yaml y = new Yaml();
+        // SafeConstructor only builds standard YAML types; arbitrary class tags (!!javax.script...) are rejected.
+        Yaml y = new Yaml(new SafeConstructor());
         y.load(content);
     }
 

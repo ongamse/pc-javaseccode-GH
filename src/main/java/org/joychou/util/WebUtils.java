@@ -27,7 +27,18 @@ public class WebUtils {
     }
 
 
+    // A JSONP callback must be a (dotted) JavaScript identifier, anything else could inject script.
+    private static final java.util.regex.Pattern JSONP_CALLBACK_PATTERN =
+            java.util.regex.Pattern.compile("^[a-zA-Z_$][a-zA-Z0-9_$]*(\\.[a-zA-Z_$][a-zA-Z0-9_$]*)*$");
+
+    public static boolean isValidJsonpCallback(String callback) {
+        return callback != null && callback.length() <= 128 && JSONP_CALLBACK_PATTERN.matcher(callback).matches();
+    }
+
     public static String json2Jsonp(String callback, String jsonStr) {
+        if (!isValidJsonpCallback(callback)) {
+            return "error";
+        }
         return HtmlUtils.htmlEscape(callback) + "(" + jsonStr + ")";
     }
 
