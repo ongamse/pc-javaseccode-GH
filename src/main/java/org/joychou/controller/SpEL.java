@@ -11,6 +11,7 @@ import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 
 import java.util.ArrayList;
 
@@ -32,7 +33,7 @@ public class SpEL {
     @GetMapping("/spel/vuln")
     public String rce(String expression) {
         ExpressionParser parser = new SpelExpressionParser();
-        return parser.parseExpression(expression).getValue(restrictedContext()).toString();
+        return HtmlUtils.htmlEscape(parser.parseExpression(expression).getValue(restrictedContext()).toString());
     }
 
     /**
