@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern CRLF_PATTERN = Pattern.compile("[\\r\\n]|%(25)*0[aAdD]");
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(
             Arrays.asList("whoami", "pwd", "date", "hostname", "uname", "id", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
@@ -201,6 +202,27 @@ public class SecurityUtil {
         }
 
         return filepath;
+    }
+
+
+    /**
+     * Neutralize CR/LF (raw and percent-encoded, including multiply-encoded) in a value that is
+     * going to be written into an HTTP response header, to prevent header injection / response splitting.
+     *
+     * @param value header value
+     * @return the value without CR/LF; null if the input is null
+     */
+    public static String crlfFilter(String value) {
+        if (null == value) {
+            return null;
+        }
+        String prev;
+        String cur = value;
+        do {
+            prev = cur;
+            cur = CRLF_PATTERN.matcher(prev).replaceAll("");
+        } while (!cur.equals(prev));
+        return cur;
     }
 
 
