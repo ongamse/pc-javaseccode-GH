@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
+import org.joychou.security.SecurityUtil;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -95,10 +96,16 @@ public class Rce {
     @GetMapping("/jscmd")
     public void jsEngine(String jsurl) throws Exception{
         // js nashorn javascript ecmascript
+        // Only load scripts from allowlisted http(s) domains; reject everything else.
+        String safeUrl = SecurityUtil.checkURL(jsurl);
+        if (safeUrl == null) {
+            throw new IllegalArgumentException("Illegal jsurl");
+        }
         ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
         Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
-        String cmd = String.format("load(\"%s\")", jsurl);
-        engine.eval(cmd, bindings);
+        // Pass the URL as a bound variable so it is never concatenated into script source.
+        bindings.put("safeJsUrl", safeUrl);
+        engine.eval("load(safeJsUrl)", bindings);
     }
 
 

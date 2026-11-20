@@ -1,6 +1,7 @@
 package org.joychou.security;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.serializer.SerializerFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -46,6 +47,9 @@ public class LoginSuccessHandler implements AuthenticationSuccessHandler {
         content.put("redirectUrl", originUrl);
         // 直接进行sendRedirect到登录前的url，会重定向失败。具体原因可google ajax and sendRedirect
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.getWriter().write(JSON.toJSONString(content));
+        response.setCharacterEncoding("UTF-8");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        // BrowserSecure escapes <, >, quotes, etc. as \uXXXX so redirectUrl cannot inject markup
+        response.getWriter().write(JSON.toJSONString(content, SerializerFeature.BrowserSecure));
     }
 }

@@ -15,13 +15,15 @@ import java.io.StringWriter;
 public class SSTI {
 
     /**
-     * SSTI of Java velocity. The latest Velocity version still has this problem.
-     * Fix method: Avoid to use Velocity.evaluate method.
-     * <p>
-     * http://localhost:8080/ssti/velocity?template=%23set($e=%22e%22);$e.getClass().forName(%22java.lang.Runtime%22).getMethod(%22getRuntime%22,null).invoke(null,null).exec(%22open%20-a%20Calculator%22)
-     * Open a calculator in MacOS.
+     * Constant template; request data is only ever supplied through the VelocityContext.
+     */
+    private static final String FIXED_TEMPLATE = "$author $address $phone $userInput";
+
+    /**
+     * Velocity rendering with a constant template. The request parameter is bound
+     * into the VelocityContext as data, so it is not evaluated as template code (no SSTI).
      *
-     * @param template exp
+     * @param template user supplied text, treated as data only
      */
     @GetMapping("/velocity")
     public void velocity(String template) {
@@ -33,7 +35,10 @@ public class SSTI {
         context.put("address", "217 E Broadway");
         context.put("phone", "555-1337");
 
+        // User input is bound as data in the context and never parsed as template code.
+        context.put("userInput", template);
+
         StringWriter swOut = new StringWriter();
-        Velocity.evaluate(context, swOut, "test", template);
+        Velocity.evaluate(context, swOut, "test", FIXED_TEMPLATE);
     }
 }
