@@ -27,19 +27,17 @@ public class IPForge {
     /**
      * proxy_set_header X-Real-IP $remote_addr;
      * proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for
-     * if code used X-Forwarded-For to get ip, the code must be vulnerable.
+     * if code used X-Forwarded-For / X-Real-IP to get ip, the code must be vulnerable,
+     * because the client can set these headers. Client-supplied headers are not trusted here;
+     * behind a reverse proxy, configure the container (e.g. server.use-forward-headers /
+     * RemoteIpValve with trusted proxies) so getRemoteAddr() reflects the real client.
      */
     @RequestMapping("/proxy")
     @ResponseBody
     public static String proxy(HttpServletRequest request) {
-        String ip = request.getHeader("X-Real-IP");
-        if (StringUtils.isNotBlank(ip)) {
-            return HtmlUtils.htmlEscape(ip);
-        } else {
-            String remoteAddr = request.getRemoteAddr();
-            if (StringUtils.isNotBlank(remoteAddr)) {
-                return HtmlUtils.htmlEscape(remoteAddr);
-            }
+        String remoteAddr = request.getRemoteAddr();
+        if (StringUtils.isNotBlank(remoteAddr)) {
+            return HtmlUtils.htmlEscape(remoteAddr);
         }
         return "";
     }
