@@ -109,10 +109,18 @@ public class URLWhiteList {
         String host = u.getHost();
         logger.info("host:  " + host);
 
+        // Also require the project's safe-domain check (strict URI parsing, block list)
+        // so parser-differential bypasses cannot reach the redirect.
+        String safeUrl = SecurityUtil.checkURL(url);
+        if (safeUrl == null) {
+            return;
+        }
+
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
+                res.sendRedirect(safeUrl);
+                return;
             }
         }
 
