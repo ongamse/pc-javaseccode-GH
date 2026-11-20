@@ -313,6 +313,28 @@ public class SecurityUtil {
         return sb.toString();
     }
 
+    /**
+     * Remove CR, LF and other control characters (except horizontal tab) so the value
+     * cannot split the HTTP response when used as a header value.
+     *
+     * @param value untrusted header value, may be null
+     * @return the value without control characters; null stays null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if ((ch < 0x20 && ch != '\t') || ch == 0x7f || ch == 0x85 || ch == 0x2028 || ch == 0x2029) {
+                continue;
+            }
+            sb.append(ch);
+        }
+        return sb.toString();
+    }
+
     public static void main(String[] args) {
     }
 

@@ -128,7 +128,7 @@ public class SSRF {
             }
             String downLoadImgFileName = WebUtils.getNameWithoutExtension(url) + "." + WebUtils.getFileExtension(url);
             // download
-            response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
+            response.setHeader("content-disposition", "attachment;fileName=" + SecurityUtil.sanitizeHeaderValue(downLoadImgFileName));
 
             HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
             conn.setInstanceFollowRedirects(false);
