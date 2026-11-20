@@ -14,9 +14,12 @@ import java.io.StringWriter;
 @RequestMapping("/ssti")
 public class SSTI {
 
+    private static final String FIXED_TEMPLATE =
+            "Author: $author, Address: $address, Phone: $phone, Input: $userInput";
+
     /**
      * SSTI of Java velocity. The latest Velocity version still has this problem.
-     * Fix method: Avoid to use Velocity.evaluate method.
+     * Fix method: Never evaluate user-controlled template text; use a fixed template and bind user input as data.
      * <p>
      * http://localhost:8080/ssti/velocity?template=%23set($e=%22e%22);$e.getClass().forName(%22java.lang.Runtime%22).getMethod(%22getRuntime%22,null).invoke(null,null).exec(%22open%20-a%20Calculator%22)
      * Open a calculator in MacOS.
@@ -33,7 +36,11 @@ public class SSTI {
         context.put("address", "217 E Broadway");
         context.put("phone", "555-1337");
 
+        // The user value is bound as data only; the template text is a fixed constant.
+        // Velocity does not re-evaluate context values, so it cannot inject directives.
+        context.put("userInput", template);
+
         StringWriter swOut = new StringWriter();
-        Velocity.evaluate(context, swOut, "test", template);
+        Velocity.evaluate(context, swOut, "test", FIXED_TEMPLATE);
     }
 }
