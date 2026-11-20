@@ -36,17 +36,30 @@ public class AntObjectInputStream extends ObjectInputStream {
         // Deserialize class name: org.joychou.security.AntObjectInputStream$MyObject
         logger.info("Deserialize class name: " + className);
 
-        String[] denyClasses = {"java.net.InetAddress",
-                                "org.apache.commons.collections.Transformer",
-                                "org.apache.commons.collections.functors"};
+        // Allowlist: only these exact classes (and primitive/array-of-allowed descriptors) may be deserialized.
+        String[] allowClasses = {"org.joychou.security.AntObjectInputStream$MyObject",
+                                 "org.joychou.dao.User",
+                                 "java.lang.Number",
+                                 "java.lang.Integer"};
 
-        for (String denyClass : denyClasses) {
-            if (className.startsWith(denyClass)) {
-                throw new InvalidClassException("Unauthorized deserialization attempt", className);
-            }
+        String checkName = className;
+        while (checkName.startsWith("[")) {
+            checkName = checkName.substring(1);
+        }
+        // Array descriptors: "[I" (primitive) or "[Lcom.Foo;" (object).
+        if (checkName.length() == 1) {
+            return super.resolveClass(desc);
+        }
+        if (checkName.startsWith("L") && checkName.endsWith(";")) {
+            checkName = checkName.substring(1, checkName.length() - 1);
         }
 
-        return super.resolveClass(desc);
+        for (String allowClass : allowClasses) {
+            if (allowClass.equals(checkName)) {
+                return super.resolveClass(desc);
+            }
+        }
+        throw new InvalidClassException("Unauthorized deserialization attempt", className);
     }
 
     public static void main(String args[]) throws Exception{
