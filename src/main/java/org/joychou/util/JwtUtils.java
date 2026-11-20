@@ -70,6 +70,11 @@ public class JwtUtils {
      * @return Valid token returns true. Invalid token returns false.
      */
     public static Boolean verifyTokenByJavaJwt(String token) {
+        // Bound size and charset before the JWT library Base64-decodes the token.
+        if (!Base64Utils.isWellFormedJwt(token)) {
+            log.error("token is malformed or too long");
+            return false;
+        }
         try {
             Algorithm algorithm = Algorithm.HMAC256(SECRET);
             JWTVerifier verifier = JWT.require(algorithm).build();
