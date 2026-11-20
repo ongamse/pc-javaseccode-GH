@@ -143,6 +143,24 @@ public class SecurityUtil {
 
 
     /**
+     * Neutralize an untrusted value that will be used as a cookie value (written to a Set-Cookie header).
+     * Removes CR/LF first (via {@link #sanitizeHeaderValue(String)}) and then every character that is
+     * not a valid RFC 6265 cookie-octet (control chars, whitespace, double quote, comma, semicolon,
+     * backslash, non-ASCII).
+     *
+     * @param value the untrusted cookie value
+     * @return the sanitized cookie value; null if value is null
+     */
+    public static String sanitizeCookieValue(String value) {
+        String noCrlf = sanitizeHeaderValue(value);
+        if (noCrlf == null) {
+            return null;
+        }
+        return noCrlf.replaceAll("[^\\x21\\x23-\\x2B\\x2D-\\x3A\\x3C-\\x5B\\x5D-\\x7E]", "");
+    }
+
+
+    /**
      * 通过自定义白名单域名处理SSRF漏洞。如果URL范围收敛，强烈建议使用该方案。
      * 这是最简单也最有效的修复方式。因为SSRF都是发起URL请求时造成，大多数场景是图片场景，一般图片的域名都是CDN或者OSS等，所以限定域名白名单即可完成SSRF漏洞修复。
      *
