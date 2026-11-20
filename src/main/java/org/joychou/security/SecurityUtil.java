@@ -23,6 +23,7 @@ public class SecurityUtil {
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
             Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname", "ls"));
+    private static final Pattern JDBC_DATABASE_PATTERN = Pattern.compile("^[a-zA-Z0-9_.-]*$");
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -152,6 +153,39 @@ public class SecurityUtil {
             return false;
         }
         return !SSRFChecker.isInternalIpByUrl(url);
+    }
+
+    /**
+     * Validate a user supplied JDBC url before it is handed to {@link java.sql.DriverManager}.
+     * Only <code>jdbc:&lt;subprotocol&gt;://host[:port][/database]</code> is accepted: no driver
+     * properties (<code>?</code>, <code>;</code>, <code>&amp;</code>) and no user-info, and the host must
+     * resolve to a non-internal address (same check as {@link #checkSSRFWithoutRedirect(String)}).
+     *
+     * @param jdbcUrl     the jdbc url to check
+     * @param subprotocol allowed jdbc subprotocol, e.g. "postgresql" or "db2"
+     * @return Safe url returns true. Dangerous url returns false.
+     */
+    public static boolean checkJdbcUrl(String jdbcUrl, String subprotocol) {
+        if (jdbcUrl == null || subprotocol == null) {
+            return false;
+        }
+        String prefix = "jdbc:" + subprotocol + "://";
+        if (!jdbcUrl.startsWith(prefix)) {
+            return false;
+        }
+        String rest = jdbcUrl.substring(prefix.length());
+        String[] parts = rest.split("/", 2);
+        String database = parts.length > 1 ? parts[1] : "";
+        if (!JDBC_DATABASE_PATTERN.matcher(database).matches()) {
+            return false;
+        }
+        try {
+            // host[:port] only; user-info and multi-host authorities are rejected
+            return checkSSRFWithoutRedirect("http://" + parts[0] + "/");
+        } catch (Exception e) {
+            logger.error(e.toString());
+            return false;
+        }
     }
 
     /**
