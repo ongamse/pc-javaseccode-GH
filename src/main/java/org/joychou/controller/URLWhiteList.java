@@ -9,7 +9,6 @@ import org.springframework.web.util.HtmlUtils;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -101,21 +100,14 @@ public class URLWhiteList {
 
         logger.info("url:  " + url);
 
-        if (!SecurityUtil.isHttp(url)) {
+        // Fail closed: only redirect to a URL that passes the shared allowlist/blocklist check.
+        String safeUrl = SecurityUtil.checkURL(url);
+        if (safeUrl == null) {
+            res.setStatus(HttpServletResponse.SC_FORBIDDEN);
             return;
         }
 
-        URL u = new URL(url);
-        String host = u.getHost();
-        logger.info("host:  " + host);
-
-        // endsWith .
-        for (String domain : domainwhitelist) {
-            if (host.endsWith("." + domain)) {
-                res.sendRedirect(url);
-            }
-        }
-
+        res.sendRedirect(safeUrl);
     }
 
 
