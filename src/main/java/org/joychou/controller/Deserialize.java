@@ -1,7 +1,7 @@
 package org.joychou.controller;
 
 import org.joychou.config.Constants;
-import org.joychou.security.AntObjectInputStream;
+import org.joychou.security.AllowlistObjectInputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -45,9 +45,12 @@ public class Deserialize {
         byte[] decoded = Base64.getDecoder().decode(rememberMe);
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
-        ObjectInputStream in = new ObjectInputStream(bytes);
-        in.readObject();
-        in.close();
+        try (ObjectInputStream in = new AllowlistObjectInputStream(bytes)) {
+            in.readObject();
+        } catch (InvalidClassException e) {
+            logger.info(e.toString());
+            return e.toString();
+        }
 
         return "Are u ok?";
     }
@@ -71,10 +74,8 @@ public class Deserialize {
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
 
-        try {
-            AntObjectInputStream in = new AntObjectInputStream(bytes);  // throw InvalidClassException
+        try (ObjectInputStream in = new AllowlistObjectInputStream(bytes)) {  // throw InvalidClassException
             in.readObject();
-            in.close();
         } catch (InvalidClassException e) {
             logger.info(e.toString());
             return e.toString();

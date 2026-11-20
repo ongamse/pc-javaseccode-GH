@@ -1,21 +1,39 @@
 package org.joychou.controller;
 
 import groovy.lang.GroovyShell;
+import jdk.nashorn.api.scripting.ClassFilter;
+import jdk.nashorn.api.scripting.NashornScriptEngineFactory;
 import lombok.extern.slf4j.Slf4j;
+import org.codehaus.groovy.ast.expr.BinaryExpression;
+import org.codehaus.groovy.ast.expr.ConstantExpression;
+import org.codehaus.groovy.ast.expr.Expression;
+import org.codehaus.groovy.ast.expr.UnaryMinusExpression;
+import org.codehaus.groovy.ast.expr.UnaryPlusExpression;
+import org.codehaus.groovy.ast.stmt.BlockStatement;
+import org.codehaus.groovy.ast.stmt.ExpressionStatement;
+import org.codehaus.groovy.ast.stmt.ReturnStatement;
+import org.codehaus.groovy.ast.stmt.Statement;
+import org.codehaus.groovy.control.CompilerConfiguration;
+import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
+import org.codehaus.groovy.syntax.Types;
+import org.joychou.security.SecurityUtil;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import javax.script.Bindings;
 import javax.script.ScriptContext;
 import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.math.BigDecimal;
 import java.sql.DriverManager;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 
 /**
@@ -33,8 +51,14 @@ public class Rce {
         Runtime run = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder();
 
+        // Allowlisted command, executed as argv without a shell.
+        String[] argv = SecurityUtil.allowedCommand(cmd);
+        if (null == argv) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            Process p = run.exec(cmd);
+            Process p = run.exec(argv);
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -51,9 +75,9 @@ public class Rce {
             inBr.close();
             in.close();
         } catch (Exception e) {
-            return e.toString();
+            return HtmlUtils.htmlEscape(e.toString());
         }
-        return sb.toString();
+        return HtmlUtils.htmlEscape(sb.toString());
     }
 
 
@@ -65,8 +89,13 @@ public class Rce {
 
         StringBuilder sb = new StringBuilder();
 
+        // Allowlisted command, executed as argv without a shell.
+        String[] arrCmd = SecurityUtil.allowedCommand(cmd);
+        if (null == arrCmd) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
             ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
@@ -94,11 +123,25 @@ public class Rce {
      */
     @GetMapping("/jscmd")
     public void jsEngine(String jsurl) throws Exception{
-        // js nashorn javascript ecmascript
-        ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
+        // Only load scripts from allowlisted domains.
+        String safeUrl = SecurityUtil.checkURL(jsurl);
+        if (null == safeUrl) {
+            return;
+        }
+        // js nashorn javascript ecmascript. Deny all access to Java classes from the script.
+        ScriptEngine engine = new NashornScriptEngineFactory().getScriptEngine(
+                new String[]{"--no-java"},
+                Rce.class.getClassLoader(),
+                new ClassFilter() {
+                    @Override
+                    public boolean exposeToScripts(String className) {
+                        return false;
+                    }
+                });
         Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
-        String cmd = String.format("load(\"%s\")", jsurl);
-        engine.eval(cmd, bindings);
+        // The URL is passed as a binding instead of being concatenated into the script source.
+        bindings.put("jsurl", safeUrl);
+        engine.eval("load(jsurl)", bindings);
     }
 
 
@@ -110,7 +153,8 @@ public class Rce {
      */
     @GetMapping("/vuln/yarm")
     public void yarm(String content) {
-        Yaml y = new Yaml();
+        // SafeConstructor only builds plain YAML types (no arbitrary class instantiation).
+        Yaml y = new Yaml(new SafeConstructor());
         y.load(content);
     }
 
@@ -126,7 +170,26 @@ public class Rce {
      */
     @GetMapping("groovy")
     public void groovyshell(String content) {
-        GroovyShell groovyShell = new GroovyShell();
+        // Restrict the script to plain arithmetic: no method calls, imports, closures or variables.
+        SecureASTCustomizer customizer = new SecureASTCustomizer();
+        customizer.setClosuresAllowed(false);
+        customizer.setImportsWhitelist(new ArrayList<String>());
+        customizer.setStarImportsWhitelist(new ArrayList<String>());
+        customizer.setStaticImportsWhitelist(new ArrayList<String>());
+        customizer.setStaticStarImportsWhitelist(new ArrayList<String>());
+        customizer.setStatementsWhitelist(Arrays.<Class<? extends Statement>>asList(
+                BlockStatement.class, ExpressionStatement.class, ReturnStatement.class));
+        customizer.setExpressionsWhitelist(Arrays.<Class<? extends Expression>>asList(
+                BinaryExpression.class, ConstantExpression.class,
+                UnaryMinusExpression.class, UnaryPlusExpression.class));
+        customizer.setTokensWhitelist(Arrays.asList(
+                Types.PLUS, Types.MINUS, Types.MULTIPLY, Types.DIVIDE, Types.MOD));
+        customizer.setConstantTypesClassesWhiteList(Arrays.<Class>asList(
+                Integer.class, Long.class, Double.class, BigDecimal.class, Integer.TYPE, Long.TYPE, Double.TYPE));
+        CompilerConfiguration config = new CompilerConfiguration();
+        config.addCompilationCustomizers(customizer);
+
+        GroovyShell groovyShell = new GroovyShell(config);
         groovyShell.evaluate(content);
     }
 

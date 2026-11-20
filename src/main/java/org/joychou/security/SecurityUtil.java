@@ -12,12 +12,18 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern CRLF_PATTERN = Pattern.compile("[\\r\\n]");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "pwd", "date", "uname", "uptime", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -96,6 +102,33 @@ public class SecurityUtil {
             return null;
         } catch (NullPointerException e) {
             logger.error(e.toString());
+            return null;
+        }
+    }
+
+
+    /**
+     * Validate a CORS Origin header value. Builds on {@link #checkURL(String)} (safe/block domain
+     * config) and additionally requires a bare origin (scheme://host[:port]) without user info,
+     * path, query or fragment, so only a clean allowlisted origin is ever echoed back in
+     * Access-Control-Allow-Origin.
+     *
+     * @param origin the Origin request header value
+     * @return the origin if it is allowlisted, otherwise null
+     */
+    public static String checkOrigin(String origin) {
+        if (checkURL(origin) == null) {
+            return null;
+        }
+        try {
+            URI uri = new URI(origin);
+            String path = uri.getRawPath();
+            if (uri.getRawUserInfo() != null || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null || (path != null && !path.isEmpty())) {
+                return null;
+            }
+            return origin;
+        } catch (URISyntaxException e) {
             return null;
         }
     }
@@ -200,11 +233,39 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Allowlist for user supplied commands. Only a fixed set of read-only commands may be run,
+     * and only <code>ls</code> accepts arguments (each argument must pass {@link #cmdFilter(String)}).
+     * The result must be executed directly (argv, no shell).
+     *
+     * @param cmd user supplied command line
+     * @return argv of the allowed command, or null if the command is not allowed
+     */
+    public static String[] allowedCommand(String cmd) {
+        if (null == cmd) {
+            return null;
+        }
+        String[] tokens = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(tokens[0])) {
+            return null;
+        }
+        if (tokens.length > 1 && !"ls".equals(tokens[0])) {
+            return null;
+        }
+        for (int i = 1; i < tokens.length; i++) {
+            if (null == cmdFilter(tokens[i])) {
+                return null;
+            }
+        }
+        return tokens;
     }
 
 
@@ -247,6 +308,20 @@ public class SecurityUtil {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Remove CR and LF characters from a value that will be placed into an HTTP response header,
+     * to prevent header injection / response splitting (CWE-113).
+     *
+     * @param value untrusted header value
+     * @return the value without CR/LF; null stays null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        return CRLF_PATTERN.matcher(value).replaceAll("");
     }
 
     public static void main(String[] args) {

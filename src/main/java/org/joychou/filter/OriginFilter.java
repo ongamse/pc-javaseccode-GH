@@ -37,7 +37,8 @@ public class OriginFilter implements Filter {
         logger.info("[+] Origin: " + origin + "\tCurrent url:" + request.getRequestURL());
 
         // 以file协议访问html，origin为字符串的null，所以依然会走安全check逻辑
-        if (origin != null && SecurityUtil.checkURL(origin) == null) {
+        String allowedOrigin = SecurityUtil.checkOrigin(origin);
+        if (origin != null && allowedOrigin == null) {
             logger.error("[-] Origin check error. " + "Origin: " + origin +
                     "\tCurrent url:" + request.getRequestURL());
             response.setStatus(response.SC_FORBIDDEN);
@@ -45,8 +46,12 @@ public class OriginFilter implements Filter {
             return;
         }
 
-        response.setHeader("Access-Control-Allow-Origin", origin);
-        response.setHeader("Access-Control-Allow-Credentials", "true");
+        // 只有白名单内的origin才会回显，并且仅此时才允许携带cookie。
+        if (allowedOrigin != null) {
+            response.setHeader("Access-Control-Allow-Origin", SecurityUtil.sanitizeHeaderValue(allowedOrigin));
+            response.setHeader("Access-Control-Allow-Credentials", "true");
+            response.addHeader("Vary", "Origin");
+        }
         response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTION");
 
         filterChain.doFilter(req, res);

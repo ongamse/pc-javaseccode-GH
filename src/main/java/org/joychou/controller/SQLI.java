@@ -7,10 +7,16 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import javax.annotation.Resource;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.List;
 
 
@@ -44,6 +50,38 @@ public class SQLI {
 
 
     /**
+     * Authorization for user-record lookups: a caller may only read their own record
+     * (matched by the authenticated username); ROLE_ADMIN may read any record. Fails closed.
+     */
+    private static Authentication currentAuth() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getName() == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
+        return auth;
+    }
+
+    private static boolean isAdmin(Authentication auth) {
+        for (GrantedAuthority a : auth.getAuthorities()) {
+            if ("ROLE_ADMIN".equals(a.getAuthority())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean canAccess(Authentication auth, String targetUsername) {
+        return isAdmin(auth) || auth.getName().equals(targetUsername);
+    }
+
+    private static void requireAccess(String targetUsername) {
+        if (!canAccess(currentAuth(), targetUsername)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
+    }
+
+
+    /**
      * <p>Sql injection jbdc vuln code.</p><br>
      *
      * <a href="http://localhost:8080/sqli/jdbc/vuln?username=joychou">http://localhost:8080/sqli/jdbc/vuln?username=joychou</a>
@@ -61,10 +99,11 @@ public class SQLI {
                 System.out.println("Connect to database successfully.");
 
             // sqli vuln code
-            Statement statement = con.createStatement();
-            String sql = "select * from users where username = '" + username + "'";
+            String sql = "select * from users where username = ?";
+            PreparedStatement statement = con.prepareStatement(sql);
+            statement.setString(1, username);
             logger.info(sql);
-            ResultSet rs = statement.executeQuery(sql);
+            ResultSet rs = statement.executeQuery();
 
             while (rs.next()) {
                 String res_name = rs.getString("username");
@@ -94,6 +133,7 @@ public class SQLI {
     @RequestMapping("/jdbc/sec")
     public String jdbc_sqli_sec(@RequestParam("username") String username) {
 
+        requireAccess(username);
         StringBuilder result = new StringBuilder();
         try {
             Class.forName(driver);
@@ -146,8 +186,9 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connecting to Database successfully.");
 
-            String sql = "select * from users where username = '" + username + "'";
+            String sql = "select * from users where username = ?";
             PreparedStatement st = con.prepareStatement(sql);
+            st.setString(1, username);
 
             logger.info(st.toString());
             ResultSet rs = st.executeQuery();
@@ -180,6 +221,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln01")
     public List<User> mybatisVuln01(@RequestParam("username") String username) {
+        requireAccess(username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -190,7 +232,14 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln02")
     public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+        Authentication auth = currentAuth();
+        List<User> visible = new ArrayList<>();
+        for (User u : userMapper.findByUserNameVuln02(username)) {
+            if (canAccess(auth, u.getUsername())) {
+                visible.add(u);
+            }
+        }
+        return visible;
     }
 
     /**
@@ -210,6 +259,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec01")
     public User mybatisSec01(@RequestParam("username") String username) {
+        requireAccess(username);
         return userMapper.findByUserName(username);
     }
 
@@ -219,7 +269,11 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec02")
     public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+        User found = userMapper.findById(id);
+        if (found != null) {
+            requireAccess(found.getUsername());
+        }
+        return found;
     }
 
 

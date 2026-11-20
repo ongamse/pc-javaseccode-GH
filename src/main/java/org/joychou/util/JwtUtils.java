@@ -16,6 +16,8 @@ import java.util.Date;
 @Slf4j
 public class JwtUtils {
 
+    private static final java.util.regex.Pattern JWT_FORMAT = java.util.regex.Pattern.compile(
+            "^[A-Za-z0-9_-]{1,4096}\\.[A-Za-z0-9_-]{1,4096}\\.[A-Za-z0-9_-]{1,2048}$");
     private static final long EXPIRE = 1440 * 60 * 1000;  // 1440 Minutes, 1 DAY
     private static final String SECRET = "123456";
     private static final String B64_SECRET = Base64.getEncoder().encodeToString(SECRET.getBytes(StandardCharsets.UTF_8));
@@ -70,6 +72,12 @@ public class JwtUtils {
      * @return Valid token returns true. Invalid token returns false.
      */
     public static Boolean verifyTokenByJavaJwt(String token) {
+        // Reject anything that is not a bounded three-segment base64url token before the
+        // library Base64-decodes attacker-supplied data.
+        if (token == null || !JWT_FORMAT.matcher(token).matches()) {
+            log.error("token has invalid format");
+            return false;
+        }
         try {
             Algorithm algorithm = Algorithm.HMAC256(SECRET);
             JWTVerifier verifier = JWT.require(algorithm).build();
