@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern CRLF_PATTERN = Pattern.compile("[\\r\\n]");
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
             Arrays.asList("whoami", "id", "pwd", "date", "uname", "uptime", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
@@ -280,6 +281,20 @@ public class SecurityUtil {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Remove CR and LF characters from a value that will be placed into an HTTP response header,
+     * to prevent header injection / response splitting (CWE-113).
+     *
+     * @param value untrusted header value
+     * @return the value without CR/LF; null stays null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        return CRLF_PATTERN.matcher(value).replaceAll("");
     }
 
     public static void main(String[] args) {
