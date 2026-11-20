@@ -7,10 +7,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 
 @RestController
@@ -40,9 +40,19 @@ public class PathTraversal {
         logger.info("Working directory: " + System.getProperty("user.dir"));
         logger.info("File path: " + imgFile);
 
-        File f = new File(imgFile);
-        if (f.exists() && !f.isDirectory()) {
-            byte[] data = Files.readAllBytes(Paths.get(imgFile));
+        // Confine reads to the working directory; absolute paths and ".." escapes are rejected.
+        Path baseDir = Paths.get(System.getProperty("user.dir")).toRealPath();
+        Path target = baseDir.resolve(imgFile).normalize();
+        if (!target.startsWith(baseDir)) {
+            return "Bad boy. Illegal file path.";
+        }
+        if (Files.exists(target) && !Files.isDirectory(target)) {
+            // Resolve symlinks and re-check containment.
+            Path realTarget = target.toRealPath();
+            if (!realTarget.startsWith(baseDir)) {
+                return "Bad boy. Illegal file path.";
+            }
+            byte[] data = Files.readAllBytes(realTarget);
             return new String(Base64.encodeBase64(data));
         } else {
             return "File doesn't exist or is not a file.";
