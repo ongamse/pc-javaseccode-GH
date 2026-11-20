@@ -10,6 +10,8 @@ import javax.servlet.RequestDispatcher;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Locale;
+import java.util.regex.Pattern;
 
 import org.joychou.security.SecurityUtil;
 
@@ -24,6 +26,9 @@ import org.joychou.security.SecurityUtil;
 @Controller
 @RequestMapping("/urlRedirect")
 public class URLRedirect {
+
+    private static final Pattern FORWARD_PATH_PATTERN = Pattern.compile("^/[a-zA-Z0-9_/.-]*$");
+    private static final String[] FORWARD_ALLOWED_PREFIXES = {"/urlRedirect/", "/test/"};
 
     /**
      * http://localhost:8080/urlRedirect/redirect?url=http://www.baidu.com
@@ -70,12 +75,41 @@ public class URLRedirect {
     @ResponseBody
     public static void forward(HttpServletRequest request, HttpServletResponse response) {
         String url = request.getParameter("url");
+        if (!isSafeForwardPath(url)) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
         RequestDispatcher rd = request.getRequestDispatcher(url);
         try {
             rd.forward(request, response);
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+
+    /**
+     * Allow forwarding only to internal controller paths under an allowlisted prefix.
+     * Rejects null, relative/absolute URLs, traversal, encoded or special characters,
+     * and WEB-INF / META-INF resources.
+     */
+    private static boolean isSafeForwardPath(String path) {
+        if (path == null || !FORWARD_PATH_PATTERN.matcher(path).matches()) {
+            return false;
+        }
+        if (path.contains("..") || path.contains("//")) {
+            return false;
+        }
+        String lower = path.toLowerCase(Locale.ROOT);
+        if (lower.contains("web-inf") || lower.contains("meta-inf")) {
+            return false;
+        }
+        for (String prefix : FORWARD_ALLOWED_PREFIXES) {
+            if (path.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
 
