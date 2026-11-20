@@ -1,6 +1,9 @@
 package org.joychou.controller;
 
+import org.springframework.web.util.HtmlUtils;
+import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.ExpressionParser;
+import org.springframework.expression.spel.support.SimpleEvaluationContext;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,8 +27,9 @@ public class SpEL {
     @GetMapping("/spel/vuln")
     public String rce(String expression) {
         ExpressionParser parser = new SpelExpressionParser();
-        // fix method: SimpleEvaluationContext
-        return parser.parseExpression(expression).getValue().toString();
+        // SimpleEvaluationContext: no type references (T()), constructors, bean refs or arbitrary method calls.
+        EvaluationContext context = SimpleEvaluationContext.forReadOnlyDataBinding().build();
+        return HtmlUtils.htmlEscape(String.valueOf(parser.parseExpression(expression).getValue(context)));
     }
 
     public static void main(String[] args) {

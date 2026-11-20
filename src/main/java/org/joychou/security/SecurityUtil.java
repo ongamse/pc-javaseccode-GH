@@ -12,12 +12,18 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname", "ls"));
+    private static final Pattern JDBC_DATABASE_PATTERN = Pattern.compile("^[a-zA-Z0-9_.-]*$");
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -150,6 +156,39 @@ public class SecurityUtil {
     }
 
     /**
+     * Validate a user supplied JDBC url before it is handed to {@link java.sql.DriverManager}.
+     * Only <code>jdbc:&lt;subprotocol&gt;://host[:port][/database]</code> is accepted: no driver
+     * properties (<code>?</code>, <code>;</code>, <code>&amp;</code>) and no user-info, and the host must
+     * resolve to a non-internal address (same check as {@link #checkSSRFWithoutRedirect(String)}).
+     *
+     * @param jdbcUrl     the jdbc url to check
+     * @param subprotocol allowed jdbc subprotocol, e.g. "postgresql" or "db2"
+     * @return Safe url returns true. Dangerous url returns false.
+     */
+    public static boolean checkJdbcUrl(String jdbcUrl, String subprotocol) {
+        if (jdbcUrl == null || subprotocol == null) {
+            return false;
+        }
+        String prefix = "jdbc:" + subprotocol + "://";
+        if (!jdbcUrl.startsWith(prefix)) {
+            return false;
+        }
+        String rest = jdbcUrl.substring(prefix.length());
+        String[] parts = rest.split("/", 2);
+        String database = parts.length > 1 ? parts[1] : "";
+        if (!JDBC_DATABASE_PATTERN.matcher(database).matches()) {
+            return false;
+        }
+        try {
+            // host[:port] only; user-info and multi-host authorities are rejected
+            return checkSSRFWithoutRedirect("http://" + parts[0] + "/");
+        } catch (Exception e) {
+            logger.error(e.toString());
+            return false;
+        }
+    }
+
+    /**
      * Check ssrf by hook socket. Start socket hook.
      *
      * @author liergou @ 2020-04-04 02:15
@@ -200,11 +239,36 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Parse a user supplied command line into an argv array without involving a shell.
+     * The executable must be in a fixed allowlist and every argument must only contain
+     * <code>a-zA-Z0-9_/.-</code> characters.
+     *
+     * @param cmd user supplied command line, e.g. "ls -la /tmp"
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] safeCommand(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!FILTER_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
     }
 
 
@@ -246,6 +310,28 @@ public class SecurityUtil {
             }
         }
 
+        return sb.toString();
+    }
+
+    /**
+     * Remove CR, LF and other control characters (except horizontal tab) so the value
+     * cannot split the HTTP response when used as a header value.
+     *
+     * @param value untrusted header value, may be null
+     * @return the value without control characters; null stays null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if ((ch < 0x20 && ch != '\t') || ch == 0x7f || ch == 0x85 || ch == 0x2028 || ch == 0x2029) {
+                continue;
+            }
+            sb.append(ch);
+        }
         return sb.toString();
     }
 

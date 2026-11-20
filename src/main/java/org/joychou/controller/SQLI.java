@@ -9,8 +9,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.security.access.AccessDeniedException;
+
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.Principal;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.List;
 
 
@@ -44,6 +51,28 @@ public class SQLI {
 
 
     /**
+     * Ownership check (IDOR protection): only the authenticated principal may access its own
+     * record, unless it has the ADMIN role. Fails closed when there is no authenticated principal.
+     *
+     * @throws AccessDeniedException handled by Spring Security as 403 forbidden
+     */
+    private static void checkOwnerOrAdmin(HttpServletRequest request, String targetUsername) {
+        Principal principal = request.getUserPrincipal();
+        if (principal == null || targetUsername == null) {
+            throw new AccessDeniedException("Access denied.");
+        }
+        if (request.isUserInRole("ADMIN")) {
+            return;
+        }
+        if (!MessageDigest.isEqual(
+                principal.getName().getBytes(StandardCharsets.UTF_8),
+                targetUsername.getBytes(StandardCharsets.UTF_8))) {
+            throw new AccessDeniedException("Access denied.");
+        }
+    }
+
+
+    /**
      * <p>Sql injection jbdc vuln code.</p><br>
      *
      * <a href="http://localhost:8080/sqli/jdbc/vuln?username=joychou">http://localhost:8080/sqli/jdbc/vuln?username=joychou</a>
@@ -60,11 +89,12 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connect to database successfully.");
 
-            // sqli vuln code
-            Statement statement = con.createStatement();
-            String sql = "select * from users where username = '" + username + "'";
+            // bind the user input as a parameter
+            String sql = "select * from users where username = ?";
             logger.info(sql);
-            ResultSet rs = statement.executeQuery(sql);
+            PreparedStatement statement = con.prepareStatement(sql);
+            statement.setString(1, username);
+            ResultSet rs = statement.executeQuery();
 
             while (rs.next()) {
                 String res_name = rs.getString("username");
@@ -92,8 +122,9 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/sec?username=joychou">http://localhost:8080/sqli/jdbc/sec?username=joychou</a>
      */
     @RequestMapping("/jdbc/sec")
-    public String jdbc_sqli_sec(@RequestParam("username") String username) {
+    public String jdbc_sqli_sec(@RequestParam("username") String username, HttpServletRequest request) {
 
+        checkOwnerOrAdmin(request, username);
         StringBuilder result = new StringBuilder();
         try {
             Class.forName(driver);
@@ -146,8 +177,9 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connecting to Database successfully.");
 
-            String sql = "select * from users where username = '" + username + "'";
+            String sql = "select * from users where username = ?";
             PreparedStatement st = con.prepareStatement(sql);
+            st.setString(1, username);
 
             logger.info(st.toString());
             ResultSet rs = st.executeQuery();
@@ -179,7 +211,8 @@ public class SQLI {
      * <p>select * from users where username = 'joychou' or '1'='1' </p>
      */
     @GetMapping("/mybatis/vuln01")
-    public List<User> mybatisVuln01(@RequestParam("username") String username) {
+    public List<User> mybatisVuln01(@RequestParam("username") String username, HttpServletRequest request) {
+        checkOwnerOrAdmin(request, username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -189,8 +222,20 @@ public class SQLI {
      * <p>select * from users where username like '%joychou' or '1'='1%' </p>
      */
     @GetMapping("/mybatis/vuln02")
-    public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+    public List<User> mybatisVuln02(@RequestParam("username") String username, HttpServletRequest request) {
+        checkOwnerOrAdmin(request, username);
+        List<User> found = userMapper.findByUserNameVuln02(username);
+        if (request.isUserInRole("ADMIN")) {
+            return found;
+        }
+        // LIKE match may return other users' rows: keep only the principal's own records
+        List<User> owned = new ArrayList<>();
+        for (User u : found) {
+            if (u != null && username.equals(u.getUsername())) {
+                owned.add(u);
+            }
+        }
+        return owned;
     }
 
     /**
@@ -209,7 +254,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec01?username=joychou">http://localhost:8080/sqli/mybatis/sec01?username=joychou</a>
      */
     @GetMapping("/mybatis/sec01")
-    public User mybatisSec01(@RequestParam("username") String username) {
+    public User mybatisSec01(@RequestParam("username") String username, HttpServletRequest request) {
+        checkOwnerOrAdmin(request, username);
         return userMapper.findByUserName(username);
     }
 
@@ -218,8 +264,14 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec02?id=1">http://localhost:8080/sqli/mybatis/sec02?id=1</a>
      */
     @GetMapping("/mybatis/sec02")
-    public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+    public User mybatisSec02(@RequestParam("id") Integer id, HttpServletRequest request) {
+        User found = userMapper.findById(id);
+        if (found != null) {
+            checkOwnerOrAdmin(request, found.getUsername());
+        } else if (request.getUserPrincipal() == null) {
+            throw new AccessDeniedException("Access denied.");
+        }
+        return found;
     }
 
 

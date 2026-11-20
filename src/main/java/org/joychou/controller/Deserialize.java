@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 import org.joychou.config.Constants;
 import org.joychou.security.AntObjectInputStream;
+import org.joychou.util.Base64Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,7 +14,6 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
-import java.util.Base64;
 
 import static org.springframework.web.util.WebUtils.getCookie;
 
@@ -42,10 +42,11 @@ public class Deserialize {
         }
 
         String rememberMe = cookie.getValue();
-        byte[] decoded = Base64.getDecoder().decode(rememberMe);
+        byte[] decoded = Base64Utils.decodeUntrusted(rememberMe);
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
-        ObjectInputStream in = new ObjectInputStream(bytes);
+        // Class allowlist enforced in AntObjectInputStream.resolveClass.
+        ObjectInputStream in = new AntObjectInputStream(bytes);
         in.readObject();
         in.close();
 
@@ -67,7 +68,7 @@ public class Deserialize {
             return "No rememberMe cookie. Right?";
         }
         String rememberMe = cookie.getValue();
-        byte[] decoded = Base64.getDecoder().decode(rememberMe);
+        byte[] decoded = Base64Utils.decodeUntrusted(rememberMe);
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
 
