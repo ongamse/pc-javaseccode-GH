@@ -27,11 +27,40 @@ import org.joychou.util.WebUtils;
 public class URLRedirect {
 
     /**
+     * Returns the url when it is a safe redirect target, otherwise null.
+     * Safe targets are same-origin relative paths (single leading slash, no backslash or
+     * control characters) or absolute http(s) urls accepted by {@link SecurityUtil#checkURL(String)}.
+     */
+    private static String safeRedirectTarget(String url) {
+        if (url == null || url.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (Character.isISOControl(c) || c == '\\') {
+                return null;
+            }
+        }
+        if (url.startsWith("/")) {
+            // "//host" is a protocol-relative url to another origin.
+            return url.startsWith("//") ? null : url;
+        }
+        return SecurityUtil.checkURL(url);
+    }
+
+
+    /**
      * http://localhost:8080/urlRedirect/redirect?url=http://www.baidu.com
      */
     @GetMapping("/redirect")
-    public String redirect(@RequestParam("url") String url) {
-        return "redirect:" + url;
+    public void redirect(@RequestParam("url") String url, HttpServletResponse response) throws IOException {
+        String safeUrl = safeRedirectTarget(url);
+        if (safeUrl == null) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.getWriter().write("url forbidden");
+            return;
+        }
+        response.sendRedirect(safeUrl);
     }
 
 
@@ -40,10 +69,15 @@ public class URLRedirect {
      */
     @RequestMapping("/setHeader")
     @ResponseBody
-    public static void setHeader(HttpServletRequest request, HttpServletResponse response) {
-        String url = request.getParameter("url");
+    public static void setHeader(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        String safeUrl = safeRedirectTarget(request.getParameter("url"));
+        if (safeUrl == null) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.getWriter().write("url forbidden");
+            return;
+        }
         response.setStatus(HttpServletResponse.SC_MOVED_PERMANENTLY); // 301 redirect
-        response.setHeader("Location", WebUtils.sanitizeHeaderValue(url));
+        response.setHeader("Location", WebUtils.sanitizeHeaderValue(safeUrl));
     }
 
 
@@ -53,8 +87,13 @@ public class URLRedirect {
     @RequestMapping("/sendRedirect")
     @ResponseBody
     public static void sendRedirect(HttpServletRequest request, HttpServletResponse response) throws IOException {
-        String url = request.getParameter("url");
-        response.sendRedirect(url); // 302 redirect
+        String safeUrl = safeRedirectTarget(request.getParameter("url"));
+        if (safeUrl == null) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.getWriter().write("url forbidden");
+            return;
+        }
+        response.sendRedirect(safeUrl); // 302 redirect
     }
 
 
@@ -84,11 +123,12 @@ public class URLRedirect {
     public void sendRedirect_seccode(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         String url = request.getParameter("url");
-        if (SecurityUtil.checkURL(url) == null) {
+        String safeUrl = SecurityUtil.checkURL(url);
+        if (safeUrl == null) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.getWriter().write("url forbidden");
             return;
         }
-        response.sendRedirect(url);
+        response.sendRedirect(safeUrl);
     }
 }
