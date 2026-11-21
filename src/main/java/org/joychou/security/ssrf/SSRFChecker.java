@@ -1,6 +1,7 @@
 package org.joychou.security.ssrf;
 
 import java.net.HttpURLConnection;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
@@ -93,7 +94,9 @@ public class SSRFChecker {
             } while (connection.getResponseCode() != HttpURLConnection.HTTP_OK);
             connection.disconnect();
         } catch (Exception e) {
-            return true;  // 如果异常了，认为是安全的，防止是超时导致的异常而验证不成功。
+            // Fail closed: a URL that cannot be verified (malformed, non-HTTP redirect, I/O error) is not safe.
+            logger.error("[-] SSRF check failed. Unable to verify url: " + e.getMessage());
+            return false;
         }
         return true; // 默认返回true
     }
@@ -111,12 +114,41 @@ public class SSRFChecker {
             return true; // 异常URL当成内网IP等非法URL处理
         }
 
-        String ip = host2ip(host);
-        if (ip.equals("")) {
+        // Validate every resolved address (a host may have several A/AAAA records).
+        InetAddress[] addresses = resolveAll(host);
+        if (addresses.length == 0) {
             return true; // 如果域名转换为IP异常，则认为是非法URL
         }
 
-        return isInternalIp(ip);
+        for (InetAddress address : addresses) {
+            if (isInternalIp(address.getHostAddress())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    /**
+     * Resolve a host to all of its addresses, converting octal ipv4 notation first.
+     *
+     * @return resolved addresses; empty array if the host cannot be resolved
+     */
+    private static InetAddress[] resolveAll(String host) {
+        if (null == host) {
+            return new InetAddress[0];
+        }
+
+        if (isOctalIP(host)) {
+            host = decimalIp;
+        }
+
+        try {
+            return InetAddress.getAllByName(host);
+        } catch (Exception e) {
+            logger.error("resolveAll exception " + e.getMessage());
+            return new InetAddress[0];
+        }
     }
 
 
@@ -129,6 +161,24 @@ public class SSRFChecker {
     public static boolean isInternalIp(String strIP) {
         if (StringUtils.isEmpty(strIP)) {
             logger.error("[-] SSRF check failed. IP is empty. " + strIP);
+            return true;
+        }
+
+        // Built-in block of loopback, wildcard, link-local (cloud metadata), site-local, multicast
+        // and ipv6 unique-local addresses, independent of the configured subnet list.
+        try {
+            InetAddress addr = InetAddress.getByName(strIP);
+            if (addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                    || addr.isSiteLocalAddress() || addr.isMulticastAddress()) {
+                logger.error("[-] SSRF check failed. Internal IP: " + strIP);
+                return true;
+            }
+            if (addr instanceof Inet6Address) {
+                // fc00::/7 unique local; the ipv4 subnet list below does not apply to ipv6
+                return (addr.getAddress()[0] & 0xfe) == 0xfc;
+            }
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Illegal IP: " + strIP);
             return true;
         }
 
@@ -290,11 +340,12 @@ public class SSRFChecker {
     private static String url2host(String url) {
         try {
             // use URI instead of URL
-            URI u = new URI(url);
-            if (SecurityUtil.isHttp(url)) {
-                return u.getHost();
+            if (!SecurityUtil.isHttp(url)) {
+                return "";
             }
-            return "";
+            URI u = new URI(url);
+            String host = u.getHost();
+            return host == null ? "" : host;
         } catch (Exception e) {
             return "";
         }

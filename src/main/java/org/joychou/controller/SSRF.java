@@ -127,10 +127,17 @@ public class SSRF {
             // download
             response.setHeader("content-disposition", "attachment;fileName=" + downLoadImgFileName);
 
+            // Only http/https urls whose host does not resolve to an internal address; no redirects.
+            if (!SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
+                logger.error("[-] SSRF check failed: " + url);
+                return;
+            }
             URL u = new URL(url);
             int length;
             byte[] bytes = new byte[1024];
-            inputStream = u.openStream(); // send request
+            HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            inputStream = conn.getInputStream(); // send request
             outputStream = response.getOutputStream();
             while ((length = inputStream.read(bytes)) > 0) {
                 outputStream.write(bytes, 0, length);
