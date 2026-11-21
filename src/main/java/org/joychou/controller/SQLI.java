@@ -9,8 +9,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.security.access.AccessDeniedException;
+
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+import java.security.Principal;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -97,7 +102,9 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/sec?username=joychou">http://localhost:8080/sqli/jdbc/sec?username=joychou</a>
      */
     @RequestMapping("/jdbc/sec")
-    public String jdbc_sqli_sec(@RequestParam("username") String username) {
+    public String jdbc_sqli_sec(@RequestParam("username") String username, HttpServletRequest request) {
+
+        requireSelfOrAdmin(request, username);
 
         StringBuilder result = new StringBuilder();
         try {
@@ -185,7 +192,8 @@ public class SQLI {
      * <p>select * from users where username = 'joychou' or '1'='1' </p>
      */
     @GetMapping("/mybatis/vuln01")
-    public List<User> mybatisVuln01(@RequestParam("username") String username) {
+    public List<User> mybatisVuln01(@RequestParam("username") String username, HttpServletRequest request) {
+        requireSelfOrAdmin(request, username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -195,8 +203,20 @@ public class SQLI {
      * <p>select * from users where username like '%joychou' or '1'='1%' </p>
      */
     @GetMapping("/mybatis/vuln02")
-    public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+    public List<User> mybatisVuln02(@RequestParam("username") String username, HttpServletRequest request) {
+        // Fuzzy search: only return records the caller owns (admins see all matches).
+        List<User> matches = userMapper.findByUserNameVuln02(username);
+        if (request.isUserInRole("ADMIN")) {
+            return matches;
+        }
+        String current = currentUsername(request);
+        List<User> owned = new ArrayList<>();
+        for (User u : matches) {
+            if (u != null && current.equals(u.getUsername())) {
+                owned.add(u);
+            }
+        }
+        return owned;
     }
 
     /**
@@ -215,7 +235,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec01?username=joychou">http://localhost:8080/sqli/mybatis/sec01?username=joychou</a>
      */
     @GetMapping("/mybatis/sec01")
-    public User mybatisSec01(@RequestParam("username") String username) {
+    public User mybatisSec01(@RequestParam("username") String username, HttpServletRequest request) {
+        requireSelfOrAdmin(request, username);
         return userMapper.findByUserName(username);
     }
 
@@ -224,8 +245,12 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec02?id=1">http://localhost:8080/sqli/mybatis/sec02?id=1</a>
      */
     @GetMapping("/mybatis/sec02")
-    public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+    public User mybatisSec02(@RequestParam("id") Integer id, HttpServletRequest request) {
+        User found = userMapper.findById(id);
+        if (found != null) {
+            requireSelfOrAdmin(request, found.getUsername());
+        }
+        return found;
     }
 
 
@@ -246,6 +271,26 @@ public class SQLI {
     @GetMapping("/mybatis/orderby/sec04")
     public List<User> mybatisOrderBySec04(@RequestParam("sort") String sort) {
         return userMapper.findByUserNameVuln03(orderByColumn(SecurityUtil.sqlFilter(sort)));
+    }
+
+    private static String currentUsername(HttpServletRequest request) {
+        Principal principal = request.getUserPrincipal();
+        if (principal == null) {
+            throw new AccessDeniedException("Login required");
+        }
+        return principal.getName();
+    }
+
+    /**
+     * Ownership check: the requested user record must belong to the authenticated
+     * caller, unless the caller has the ADMIN role. Fails closed with 403.
+     */
+    private static void requireSelfOrAdmin(HttpServletRequest request, String targetUsername) {
+        String current = currentUsername(request);
+        if (request.isUserInRole("ADMIN") || current.equals(targetUsername)) {
+            return;
+        }
+        throw new AccessDeniedException("Access denied");
     }
 
     /**
