@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.util.HtmlUtils;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletResponse;
@@ -98,9 +99,11 @@ public class SSRF {
     public String request(@RequestParam String url) {
         try {
             SecurityUtil.startSSRFHook();
-            return HttpUtils.request(url);
+            String content = HttpUtils.request(url);
+            return content == null ? null : HtmlUtils.htmlEscape(content, "UTF-8");
         } catch (SSRFException | IOException e) {
-            return e.getMessage();
+            String msg = e.getMessage();
+            return msg == null ? null : HtmlUtils.htmlEscape(msg, "UTF-8");
         } finally {
             SecurityUtil.stopSSRFHook();
         }
