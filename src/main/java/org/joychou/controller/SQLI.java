@@ -11,7 +11,11 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import java.sql.*;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 
 /**
@@ -60,11 +64,12 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connect to database successfully.");
 
-            // sqli vuln code
-            Statement statement = con.createStatement();
-            String sql = "select * from users where username = '" + username + "'";
-            logger.info(sql);
-            ResultSet rs = statement.executeQuery(sql);
+            // bound parameter instead of string concatenation
+            String sql = "select * from users where username = ?";
+            PreparedStatement statement = con.prepareStatement(sql);
+            statement.setString(1, username);
+            logger.info(statement.toString());
+            ResultSet rs = statement.executeQuery();
 
             while (rs.next()) {
                 String res_name = rs.getString("username");
@@ -146,8 +151,9 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connecting to Database successfully.");
 
-            String sql = "select * from users where username = '" + username + "'";
+            String sql = "select * from users where username = ?";
             PreparedStatement st = con.prepareStatement(sql);
+            st.setString(1, username);
 
             logger.info(st.toString());
             ResultSet rs = st.executeQuery();
@@ -200,7 +206,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/orderby/vuln03")
     public List<User> mybatisVuln03(@RequestParam("sort") String sort) {
-        return userMapper.findByUserNameVuln03(sort);
+        return userMapper.findByUserNameVuln03(orderByColumn(sort));
     }
 
 
@@ -239,7 +245,25 @@ public class SQLI {
      */
     @GetMapping("/mybatis/orderby/sec04")
     public List<User> mybatisOrderBySec04(@RequestParam("sort") String sort) {
-        return userMapper.findByUserNameVuln03(SecurityUtil.sqlFilter(sort));
+        return userMapper.findByUserNameVuln03(orderByColumn(SecurityUtil.sqlFilter(sort)));
+    }
+
+    /**
+     * Allowlist of sortable columns. ORDER BY cannot use bound parameters,
+     * so only these known column names may reach the mapper.
+     */
+    private static final Set<String> ORDER_BY_COLUMNS =
+            new HashSet<>(Arrays.asList("id", "username", "password"));
+
+    /**
+     * @return the canonical column name if allowlisted, otherwise null (no ordering applied)
+     */
+    private static String orderByColumn(String sort) {
+        if (sort == null) {
+            return null;
+        }
+        String column = sort.trim().toLowerCase(Locale.ROOT);
+        return ORDER_BY_COLUMNS.contains(column) ? column : null;
     }
 
 }
