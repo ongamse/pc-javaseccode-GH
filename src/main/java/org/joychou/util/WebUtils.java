@@ -32,6 +32,18 @@ public class WebUtils {
     }
 
 
+    /**
+     * Remove CR, LF and other control characters so that untrusted data
+     * cannot split or inject HTTP response headers. Null stays null.
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replaceAll("[\\p{Cntrl}&&[^\\t]]", "");
+    }
+
+
     public static String getFileExtension(String fullName) {
         Preconditions.checkNotNull(fullName);
         String fileName = (new File(fullName)).getName();
