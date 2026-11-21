@@ -39,9 +39,14 @@ public class SecurityUtil {
      * @return host
      */
     public static String gethost(String url) {
+        // Only parse http/https urls; anything else (file:, jar:, gopher:, null, ...) yields no host.
+        if (url == null || !isHttp(url)) {
+            return "";
+        }
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            return host == null ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
