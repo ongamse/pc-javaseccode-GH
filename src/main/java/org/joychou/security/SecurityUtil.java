@@ -109,6 +109,42 @@ public class SecurityUtil {
 
 
     /**
+     * Validate an untrusted CORS <code>Origin</code> request header against the domain allowlist
+     * (url/url_safe_domain.xml, via {@link #checkURL(String)}). The origin must be a bare
+     * scheme://host[:port] value: userinfo, path, query and fragment are rejected, as is the
+     * literal "null" origin. Only a value returned by this method may be echoed into
+     * Access-Control-Allow-Origin.
+     *
+     * @param origin untrusted Origin header value
+     * @return the original origin when allowlisted; null when it must not be allowed
+     */
+    public static String safeCorsOrigin(String origin) {
+        if (origin == null || origin.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < origin.length(); i++) {
+            if (Character.isISOControl(origin.charAt(i))) {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(origin);
+            if (uri.getHost() == null || uri.getRawUserInfo() != null || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null) {
+                return null;
+            }
+            String path = uri.getRawPath();
+            if (path != null && !path.isEmpty()) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return checkURL(origin);
+    }
+
+
+    /**
      * Validate an untrusted redirect target. Allowed targets are either a same-site absolute
      * path (starts with a single "/") or an absolute http/https url accepted by
      * {@link #checkURL(String)}. Control characters and backslashes are always rejected so
