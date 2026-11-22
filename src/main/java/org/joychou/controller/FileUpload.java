@@ -7,6 +7,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+import org.springframework.web.util.HtmlUtils;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -59,7 +60,7 @@ public class FileUpload {
         try {
             // Get the file and save it somewhere
             byte[] bytes = file.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + file.getOriginalFilename());
+            Path path = resolveInUploadDir(file.getOriginalFilename());
             Files.write(path, bytes);
 
             redirectAttributes.addFlashAttribute("message",
@@ -87,9 +88,16 @@ public class FileUpload {
         }
 
         String fileName = multifile.getOriginalFilename();
+        Path safePath;
+        try {
+            safePath = resolveInUploadDir(fileName);
+        } catch (IOException e) {
+            logger.error("[-] Illegal file name");
+            return "Upload failed. Illeagl picture.";
+        }
         String Suffix = fileName.substring(fileName.lastIndexOf(".")); // 获取文件后缀名
         String mimeType = multifile.getContentType(); // 获取MIME类型
-        String filePath = UPLOADED_FOLDER + fileName;
+        String filePath = safePath.toString();
         File excelFile = convert(multifile);
 
 
@@ -141,8 +149,7 @@ public class FileUpload {
         try {
             // Get the file and save it somewhere
             byte[] bytes = multifile.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + multifile.getOriginalFilename());
-            Files.write(path, bytes);
+            Files.write(safePath, bytes);
         } catch (IOException e) {
             logger.error(e.toString());
             deleteFile(filePath);
@@ -151,11 +158,38 @@ public class FileUpload {
 
         logger.info("[+] Safe file. Suffix: {}, MIME: {}", Suffix, mimeType);
         logger.info("[+] Successfully uploaded {}", filePath);
-        return String.format("You successfully uploaded '%s'", filePath);
+        return String.format("You successfully uploaded '%s'", HtmlUtils.htmlEscape(filePath));
+    }
+
+    /**
+     * Resolve a file name inside UPLOADED_FOLDER; reject names that escape it
+     * (e.g. "../" sequences or absolute paths).
+     */
+    private static Path resolveInUploadDir(String name) throws IOException {
+        if (name == null || name.isEmpty()) {
+            throw new IOException("Illegal file name");
+        }
+        try {
+            Path base = Paths.get(UPLOADED_FOLDER).toAbsolutePath().normalize();
+            Path resolved = Paths.get(UPLOADED_FOLDER + name).toAbsolutePath().normalize();
+            if (!resolved.startsWith(base) || resolved.equals(base)) {
+                throw new IOException("Illegal file name");
+            }
+            return resolved;
+        } catch (java.nio.file.InvalidPathException e) {
+            throw new IOException("Illegal file name", e);
+        }
     }
 
     private void deleteFile(String filePath) {
-        File delFile = new File(filePath);
+        File delFile;
+        try {
+            delFile = resolveInUploadDir(filePath.startsWith(UPLOADED_FOLDER)
+                    ? filePath.substring(UPLOADED_FOLDER.length()) : filePath).toFile();
+        } catch (IOException e) {
+            logger.info("Illegal file path, delete skipped");
+            return;
+        }
         if(delFile.isFile() && delFile.exists()) {
             if (delFile.delete()) {
                 logger.info("[+] " + filePath + " delete successfully!");
@@ -175,9 +209,9 @@ public class FileUpload {
         String fileName = multiFile.getOriginalFilename();
         String suffix = fileName.substring(fileName.lastIndexOf("."));
         UUID uuid = Generators.timeBasedGenerator().generate();
-        randomFilePath = UPLOADED_FOLDER + uuid + suffix;
         // 随机生成一个同后缀名的文件
-        File convFile = new File(randomFilePath);
+        File convFile = resolveInUploadDir(uuid + suffix).toFile();
+        randomFilePath = convFile.getPath();
         boolean ret = convFile.createNewFile();
         if (!ret) {
             return null;

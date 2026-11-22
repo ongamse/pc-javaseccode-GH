@@ -2,9 +2,25 @@ package org.joychou.controller;
 
 import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
+import org.codehaus.groovy.ast.expr.BinaryExpression;
+import org.codehaus.groovy.ast.expr.BooleanExpression;
+import org.codehaus.groovy.ast.expr.ConstantExpression;
+import org.codehaus.groovy.ast.expr.Expression;
+import org.codehaus.groovy.ast.expr.TernaryExpression;
+import org.codehaus.groovy.ast.expr.UnaryMinusExpression;
+import org.codehaus.groovy.ast.expr.UnaryPlusExpression;
+import org.codehaus.groovy.ast.stmt.BlockStatement;
+import org.codehaus.groovy.ast.stmt.ExpressionStatement;
+import org.codehaus.groovy.ast.stmt.ReturnStatement;
+import org.codehaus.groovy.ast.stmt.Statement;
+import org.codehaus.groovy.control.CompilerConfiguration;
+import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
+import org.codehaus.groovy.syntax.Types;
+import org.joychou.security.SecurityUtil;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
@@ -16,6 +32,9 @@ import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.sql.DriverManager;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 
 /**
@@ -30,11 +49,15 @@ public class Rce {
 
     @GetMapping("/runtime/exec")
     public String CommandExec(String cmd) {
-        Runtime run = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder();
 
+        List<String> argv = SecurityUtil.safeCommand(cmd);
+        if (argv == null) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            Process p = run.exec(cmd);
+            Process p = new ProcessBuilder(argv).start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -51,9 +74,9 @@ public class Rce {
             inBr.close();
             in.close();
         } catch (Exception e) {
-            return e.toString();
+            return HtmlUtils.htmlEscape(e.toString());
         }
-        return sb.toString();
+        return HtmlUtils.htmlEscape(sb.toString());
     }
 
 
@@ -65,9 +88,13 @@ public class Rce {
 
         StringBuilder sb = new StringBuilder();
 
+        List<String> argv = SecurityUtil.safeCommand(cmd);
+        if (argv == null) {
+            return "Bad boy. I got u.";
+        }
+
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
-            ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
+            ProcessBuilder processBuilder = new ProcessBuilder(argv);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
@@ -77,10 +104,10 @@ public class Rce {
                 sb.append(tmpStr);
             }
         } catch (Exception e) {
-            return e.toString();
+            return HtmlUtils.htmlEscape(e.toString());
         }
 
-        return sb.toString();
+        return HtmlUtils.htmlEscape(sb.toString());
     }
 
 
@@ -94,11 +121,17 @@ public class Rce {
      */
     @GetMapping("/jscmd")
     public void jsEngine(String jsurl) throws Exception{
+        // Only load scripts from allowlisted (safe-domain) http/https URLs.
+        String safeUrl = SecurityUtil.checkURL(jsurl);
+        if (safeUrl == null) {
+            return;
+        }
         // js nashorn javascript ecmascript
         ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
         Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
-        String cmd = String.format("load(\"%s\")", jsurl);
-        engine.eval(cmd, bindings);
+        // Pass the URL as a binding so it is never spliced into script source.
+        bindings.put("jsurl", safeUrl);
+        engine.eval("load(jsurl)", bindings);
     }
 
 
@@ -126,7 +159,29 @@ public class Rce {
      */
     @GetMapping("groovy")
     public void groovyshell(String content) {
-        GroovyShell groovyShell = new GroovyShell();
+        // Restrict the script to plain literal/arithmetic expressions: no method calls,
+        // property access, class references, closures, imports or method definitions.
+        SecureASTCustomizer secure = new SecureASTCustomizer();
+        secure.setClosuresAllowed(false);
+        secure.setMethodDefinitionAllowed(false);
+        secure.setImportsWhitelist(Collections.<String>emptyList());
+        secure.setStaticImportsWhitelist(Collections.<String>emptyList());
+        secure.setStaticStarImportsWhitelist(Collections.<String>emptyList());
+        secure.setStarImportsWhitelist(Collections.<String>emptyList());
+        secure.setAllowedStatements(Arrays.<Class<? extends Statement>>asList(
+                BlockStatement.class, ExpressionStatement.class, ReturnStatement.class));
+        secure.setAllowedExpressions(Arrays.<Class<? extends Expression>>asList(
+                ConstantExpression.class, BinaryExpression.class, UnaryMinusExpression.class,
+                UnaryPlusExpression.class, BooleanExpression.class, TernaryExpression.class));
+        secure.setAllowedTokens(Arrays.asList(
+                Types.PLUS, Types.MINUS, Types.MULTIPLY, Types.DIVIDE, Types.MOD,
+                Types.COMPARE_EQUAL, Types.COMPARE_NOT_EQUAL, Types.COMPARE_LESS_THAN,
+                Types.COMPARE_LESS_THAN_EQUAL, Types.COMPARE_GREATER_THAN,
+                Types.COMPARE_GREATER_THAN_EQUAL, Types.LOGICAL_AND, Types.LOGICAL_OR));
+
+        CompilerConfiguration config = new CompilerConfiguration();
+        config.addCompilationCustomizers(secure);
+        GroovyShell groovyShell = new GroovyShell(config);
         groovyShell.evaluate(content);
     }
 

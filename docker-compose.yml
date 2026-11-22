@@ -6,10 +6,14 @@ services:
         ports:
             - "8080:8080"
             - "8000:8000"
+        environment:
+            - JSC_DB_PASSWORD=${JSC_DB_PASSWORD:?set JSC_DB_PASSWORD}
         links:
             - j_mysql
 
     j_mysql:
         image: joychou/jsc_mysql:latest
+        environment:
+            - MYSQL_ROOT_PASSWORD=${JSC_DB_PASSWORD:?set JSC_DB_PASSWORD}
         ports:
             - "3306:3306"

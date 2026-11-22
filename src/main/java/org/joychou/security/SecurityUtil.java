@@ -12,12 +12,19 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Set<String> ALLOWED_COMMANDS = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList("whoami", "id", "pwd", "date", "uname", "hostname", "uptime", "ls")));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -98,6 +105,69 @@ public class SecurityUtil {
             logger.error(e.toString());
             return null;
         }
+    }
+
+
+    /**
+     * Validate an untrusted CORS <code>Origin</code> request header against the domain allowlist
+     * (url/url_safe_domain.xml, via {@link #checkURL(String)}). The origin must be a bare
+     * scheme://host[:port] value: userinfo, path, query and fragment are rejected, as is the
+     * literal "null" origin. Only a value returned by this method may be echoed into
+     * Access-Control-Allow-Origin.
+     *
+     * @param origin untrusted Origin header value
+     * @return the original origin when allowlisted; null when it must not be allowed
+     */
+    public static String safeCorsOrigin(String origin) {
+        if (origin == null || origin.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < origin.length(); i++) {
+            if (Character.isISOControl(origin.charAt(i))) {
+                return null;
+            }
+        }
+        try {
+            URI uri = new URI(origin);
+            if (uri.getHost() == null || uri.getRawUserInfo() != null || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null) {
+                return null;
+            }
+            String path = uri.getRawPath();
+            if (path != null && !path.isEmpty()) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return checkURL(origin);
+    }
+
+
+    /**
+     * Validate an untrusted redirect target. Allowed targets are either a same-site absolute
+     * path (starts with a single "/") or an absolute http/https url accepted by
+     * {@link #checkURL(String)}. Control characters and backslashes are always rejected so
+     * that browsers and the server cannot parse the target differently.
+     *
+     * @param url untrusted redirect target
+     * @return the original url when safe; null when it must not be redirected to
+     */
+    public static String safeRedirectUrl(String url) {
+        if (url == null || url.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < url.length(); i++) {
+            char ch = url.charAt(i);
+            if (Character.isISOControl(ch) || ch == '\\') {
+                return null;
+            }
+        }
+        if (url.startsWith("/")) {
+            // "//host" is a scheme-relative url to another site
+            return url.startsWith("//") ? null : url;
+        }
+        return checkURL(url);
     }
 
 
@@ -199,12 +269,62 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Neutralize header injection (CRLF injection) by removing CR, LF and every other
+     * ISO control character from a value before it is written to an HTTP response header.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null stays null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Parse a user supplied command line into an argv list that is safe to hand to
+     * {@link ProcessBuilder} (no shell). The executable must be in a small allowlist
+     * and every argument must pass {@link #cmdFilter(String)}.
+     *
+     * @param cmd user supplied command line, e.g. "ls -la /tmp"
+     * @return argv list, or null if the command is not allowed
+     */
+    public static List<String> safeCommand(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] parts = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(parts[0])) {
+            return null;
+        }
+        List<String> argv = new ArrayList<>(parts.length);
+        argv.add(parts[0]);
+        for (int i = 1; i < parts.length; i++) {
+            if (cmdFilter(parts[i]) == null) {
+                return null;
+            }
+            argv.add(parts[i]);
+        }
+        return argv;
     }
 
 

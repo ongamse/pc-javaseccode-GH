@@ -5,10 +5,12 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.util.HtmlUtils;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.net.URL;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -104,14 +106,28 @@ public class URLWhiteList {
             return;
         }
 
-        URL u = new URL(url);
+        // Strict RFC 3986 parsing: rejects backslash and other malformed authority tricks.
+        URI u;
+        try {
+            u = new URI(url);
+        } catch (URISyntaxException e) {
+            res.sendError(HttpServletResponse.SC_FORBIDDEN, "url forbidden");
+            return;
+        }
         String host = u.getHost();
         logger.info("host:  " + host);
 
+        if (host == null || u.getUserInfo() != null) {
+            res.sendError(HttpServletResponse.SC_FORBIDDEN, "url forbidden");
+            return;
+        }
+
         // endsWith .
+        String lowerHost = host.toLowerCase();
         for (String domain : domainwhitelist) {
-            if (host.endsWith("." + domain)) {
+            if (lowerHost.endsWith("." + domain)) {
                 res.sendRedirect(url);
+                return;
             }
         }
 
@@ -135,9 +151,9 @@ public class URLWhiteList {
 
         for (String whiteHost: whiteDomainlists){
             if (whiteHost.startsWith(".") && host.endsWith(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             } else if (!whiteHost.startsWith(".") && host.equals(whiteHost)) {
-                return url;
+                return HtmlUtils.htmlEscape(url);
             }
         }
 

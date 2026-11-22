@@ -7,11 +7,15 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+import java.security.Principal;
 import java.sql.*;
 import java.util.List;
+import java.util.stream.Collectors;
 
 
 /**
@@ -42,6 +46,33 @@ public class SQLI {
     @Resource
     private UserMapper userMapper;
 
+    private static final String ADMIN_ROLE = "ADMIN";
+
+    /** Responds 403 when the caller references a record that is not theirs. */
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    private static class ForbiddenException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+    }
+
+    private static String currentUsername(HttpServletRequest request) {
+        Principal principal = request.getUserPrincipal();
+        return principal == null ? null : principal.getName();
+    }
+
+    /**
+     * Object-level authorization: a user reference may only be looked up by
+     * that user or by an administrator. Fails closed.
+     */
+    private static void requireOwnerOrAdmin(HttpServletRequest request, String targetUsername) {
+        if (request.isUserInRole(ADMIN_ROLE)) {
+            return;
+        }
+        String current = currentUsername(request);
+        if (current == null || !current.equals(targetUsername)) {
+            throw new ForbiddenException();
+        }
+    }
+
 
     /**
      * <p>Sql injection jbdc vuln code.</p><br>
@@ -61,10 +92,11 @@ public class SQLI {
                 System.out.println("Connect to database successfully.");
 
             // sqli vuln code
-            Statement statement = con.createStatement();
-            String sql = "select * from users where username = '" + username + "'";
-            logger.info(sql);
-            ResultSet rs = statement.executeQuery(sql);
+            String sql = "select * from users where username = ?";
+            PreparedStatement statement = con.prepareStatement(sql);
+            statement.setString(1, username);
+            logger.info(statement.toString());
+            ResultSet rs = statement.executeQuery();
 
             while (rs.next()) {
                 String res_name = rs.getString("username");
@@ -92,8 +124,9 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/sec?username=joychou">http://localhost:8080/sqli/jdbc/sec?username=joychou</a>
      */
     @RequestMapping("/jdbc/sec")
-    public String jdbc_sqli_sec(@RequestParam("username") String username) {
+    public String jdbc_sqli_sec(@RequestParam("username") String username, HttpServletRequest request) {
 
+        requireOwnerOrAdmin(request, username);
         StringBuilder result = new StringBuilder();
         try {
             Class.forName(driver);
@@ -146,8 +179,9 @@ public class SQLI {
             if (!con.isClosed())
                 System.out.println("Connecting to Database successfully.");
 
-            String sql = "select * from users where username = '" + username + "'";
+            String sql = "select * from users where username = ?";
             PreparedStatement st = con.prepareStatement(sql);
+            st.setString(1, username);
 
             logger.info(st.toString());
             ResultSet rs = st.executeQuery();
@@ -179,7 +213,8 @@ public class SQLI {
      * <p>select * from users where username = 'joychou' or '1'='1' </p>
      */
     @GetMapping("/mybatis/vuln01")
-    public List<User> mybatisVuln01(@RequestParam("username") String username) {
+    public List<User> mybatisVuln01(@RequestParam("username") String username, HttpServletRequest request) {
+        requireOwnerOrAdmin(request, username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -189,8 +224,16 @@ public class SQLI {
      * <p>select * from users where username like '%joychou' or '1'='1%' </p>
      */
     @GetMapping("/mybatis/vuln02")
-    public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+    public List<User> mybatisVuln02(@RequestParam("username") String username, HttpServletRequest request) {
+        List<User> users = userMapper.findByUserNameVuln02(username);
+        if (request.isUserInRole(ADMIN_ROLE)) {
+            return users;
+        }
+        // Non-admins may only see their own record from a partial-match search.
+        String current = currentUsername(request);
+        return users.stream()
+                .filter(u -> current != null && current.equals(u.getUsername()))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -209,7 +252,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec01?username=joychou">http://localhost:8080/sqli/mybatis/sec01?username=joychou</a>
      */
     @GetMapping("/mybatis/sec01")
-    public User mybatisSec01(@RequestParam("username") String username) {
+    public User mybatisSec01(@RequestParam("username") String username, HttpServletRequest request) {
+        requireOwnerOrAdmin(request, username);
         return userMapper.findByUserName(username);
     }
 
@@ -218,8 +262,17 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec02?id=1">http://localhost:8080/sqli/mybatis/sec02?id=1</a>
      */
     @GetMapping("/mybatis/sec02")
-    public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+    public User mybatisSec02(@RequestParam("id") Integer id, HttpServletRequest request) {
+        User found = userMapper.findById(id);
+        // Fail closed: non-admins get the same 403 for missing and foreign ids (no enumeration oracle).
+        if (found == null) {
+            if (!request.isUserInRole(ADMIN_ROLE)) {
+                throw new ForbiddenException();
+            }
+            return null;
+        }
+        requireOwnerOrAdmin(request, found.getUsername());
+        return found;
     }
 
 
