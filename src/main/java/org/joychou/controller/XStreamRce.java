@@ -7,7 +7,12 @@ import org.joychou.util.WebUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import org.xml.sax.InputSource;
+import org.xml.sax.helpers.DefaultHandler;
+
 import javax.servlet.http.HttpServletRequest;
+import javax.xml.parsers.SAXParserFactory;
+import java.io.StringReader;
 
 
 @RestController
@@ -23,6 +28,14 @@ public class XStreamRce {
     @PostMapping("/xstream")
     public String parseXml(HttpServletRequest request) throws Exception {
         String xml = WebUtils.getRequestBody(request);
+
+        // Reject any DOCTYPE / external entity before DomDriver parses the payload (XXE).
+        SAXParserFactory spf = SAXParserFactory.newInstance();
+        spf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        spf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        spf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        spf.newSAXParser().parse(new InputSource(new StringReader(xml)), new DefaultHandler());
+
         XStream xstream = new XStream(new DomDriver());
         xstream.fromXML(xml);
         return "xstream";
