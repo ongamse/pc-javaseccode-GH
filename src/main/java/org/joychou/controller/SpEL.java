@@ -13,6 +13,7 @@ import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 
 import java.util.Collections;
 
@@ -35,7 +36,7 @@ public class SpEL {
     public String rce(String expression) {
         ExpressionParser parser = new SpelExpressionParser();
         Object result = parser.parseExpression(expression).getValue(restrictedContext());
-        return String.valueOf(result);
+        return HtmlUtils.htmlEscape(String.valueOf(result));
     }
 
     /**
