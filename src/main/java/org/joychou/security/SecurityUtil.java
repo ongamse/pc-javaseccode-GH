@@ -206,6 +206,28 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Neutralize header injection (CRLF injection) by removing CR, LF and every other
+     * ISO control character from a value before it is written to an HTTP response header.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null stays null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (!Character.isISOControl(ch)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+
     public static String cmdFilter(String input) {
         if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
