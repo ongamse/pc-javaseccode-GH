@@ -13,6 +13,7 @@ import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 
 import java.util.ArrayList;
 
@@ -37,7 +38,7 @@ public class SpEL {
         // Restricted context (Spring 4.3.6 has no SimpleEvaluationContext): no type
         // references (T(...)), no method calls, no constructors, no property access, no beans.
         // Only literals and operators can be evaluated.
-        return String.valueOf(parser.parseExpression(expression).getValue(buildRestrictedContext()));
+        return HtmlUtils.htmlEscape(String.valueOf(parser.parseExpression(expression).getValue(buildRestrictedContext())));
     }
 
     private static StandardEvaluationContext buildRestrictedContext() {

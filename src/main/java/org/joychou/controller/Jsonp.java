@@ -131,7 +131,12 @@ public class Jsonp {
 
         String callback = request.getParameter("fastjsonpCallback");
         if (StringUtils.isNotBlank(callback)) {
-            JSONPObject jsonpObj = new JSONPObject(callback);
+            // Only a plain JS identifier path may become the JSONP function name.
+            String safeCallback = WebUtils.safeJsonpCallback(callback);
+            if (safeCallback == null) {
+                return "error";
+            }
+            JSONPObject jsonpObj = new JSONPObject(safeCallback);
             jsonpObj.addParameter(csrfToken);
             return jsonpObj.toString();
         } else {
