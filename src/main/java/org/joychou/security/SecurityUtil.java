@@ -8,17 +8,62 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Set<String> SAFE_COMMANDS = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList("whoami", "id", "date", "pwd", "uname", "hostname", "uptime")));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
+
+
+    /**
+     * Strict JDBC URL allowlist: only jdbc:postgresql / jdbc:db2 with plain host[:port]/database.
+     * No query string, no ';' / ':' properties, so driver-level gadget properties
+     * (socketFactory, sslfactory, loggerFile, ...) can not be injected.
+     */
+    private static final Pattern SAFE_JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:(postgresql|db2)://[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?/[A-Za-z0-9_-]{1,64}$");
+
+    /**
+     * Decode an attacker-supplied Base64 JDBC URL and validate it against a strict allowlist.
+     *
+     * @param jdbcUrlBase64 Base64 encoded JDBC url
+     * @param driver expected driver, "postgresql" or "db2"
+     * @return the decoded and validated JDBC url
+     * @throws IllegalArgumentException if the input is not valid Base64 or the URL is not allowed
+     */
+    public static String decodeSafeJdbcUrl(String jdbcUrlBase64, String driver) {
+        if (jdbcUrlBase64 == null || jdbcUrlBase64.length() > 1024) {
+            throw new IllegalArgumentException("Invalid jdbc url");
+        }
+        String jdbcUrl = new String(java.util.Base64.getDecoder().decode(jdbcUrlBase64),
+                java.nio.charset.StandardCharsets.UTF_8);
+        if (!SAFE_JDBC_URL_PATTERN.matcher(jdbcUrl).matches()
+                || !jdbcUrl.startsWith("jdbc:" + driver + "://")) {
+            throw new IllegalArgumentException("Invalid jdbc url");
+        }
+        // The driver opens a socket to this host: do not allow loopback / private / link-local targets.
+        String hostPort = jdbcUrl.substring(jdbcUrl.indexOf("://") + 3, jdbcUrl.lastIndexOf('/'));
+        int colon = hostPort.indexOf(':');
+        String host = colon < 0 ? hostPort : hostPort.substring(0, colon);
+        if (!SSRFChecker.isPublicHost(host)) {
+            throw new IllegalArgumentException("Invalid jdbc url");
+        }
+        return jdbcUrl;
+    }
 
 
     /**
@@ -41,8 +86,17 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
-        } catch (URISyntaxException e) {
+            String host = uri.getHost();
+            if (host == null) {
+                return "";
+            }
+            // Reject URL parser differentials (e.g. backslash / userinfo tricks): the host that is
+            // checked against the allow/block lists must be the host java.net.URL will connect to.
+            if (!host.equalsIgnoreCase(new URL(url).getHost())) {
+                return "";
+            }
+            return host.toLowerCase();
+        } catch (URISyntaxException | MalformedURLException e) {
             return "";
         }
     }
@@ -199,12 +253,85 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Strip CR, LF and every other ISO control character from a request-derived value
+     * before it is written to an HTTP response header or cookie (CRLF / header injection).
+     * Legitimate values are returned unchanged.
+     *
+     * @param value untrusted header or cookie value
+     * @return the value without control characters; null stays null
+     */
+    public static String cRlfFilter(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            // 0x2028 and 0x2029 are the Unicode line and paragraph separators
+            if (!Character.isISOControl(ch) && ch != 0x2028 && ch != 0x2029) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+
+    /**
+     * Validate an attacker-supplied redirect target (open redirect, CWE-601).
+     * Allowed: an absolute http(s) url whose host passes {@link #checkURL(String)} (domain allowlist),
+     * or a same-origin absolute path such as <code>/urlRedirect/test</code>.
+     * Rejected: protocol-relative (<code>//host</code>), backslash tricks, control characters,
+     * any other scheme.
+     *
+     * @param target the redirect target taken from the request
+     * @return the target when it is safe to redirect to; null otherwise
+     */
+    public static String safeRedirectTarget(String target) {
+        if (target == null || target.isEmpty() || target.length() > 2048) {
+            return null;
+        }
+        for (int i = 0; i < target.length(); i++) {
+            char ch = target.charAt(i);
+            if (Character.isISOControl(ch) || Character.isWhitespace(ch) || ch == '\\'
+                    || ch == 0x2028 || ch == 0x2029) {
+                return null;
+            }
+        }
+        if (target.charAt(0) == '/') {
+            // "//host" is protocol-relative and would leave the origin
+            return target.length() > 1 && target.charAt(1) == '/' ? null : target;
+        }
+        return checkURL(target);
+    }
+
+
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Resolve an attacker-supplied command name against a strict allowlist of
+     * argument-less, read-only programs. The result is meant to be passed as argv to
+     * ProcessBuilder (never to a shell).
+     *
+     * @param cmd command name supplied by the user
+     * @return argv array for an allowlisted command, otherwise null
+     */
+    public static String[] safeCommand(String cmd) {
+        if (null == cmd) {
+            return null;
+        }
+        String name = cmd.trim();
+        if (!SAFE_COMMANDS.contains(name)) {
+            return null;
+        }
+        return new String[]{name};
     }
 
 

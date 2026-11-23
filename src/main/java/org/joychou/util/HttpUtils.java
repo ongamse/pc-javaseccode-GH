@@ -5,6 +5,8 @@ import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.HttpResponse;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.fluent.Executor;
 import org.apache.http.client.fluent.Request;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -14,6 +16,7 @@ import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import org.joychou.security.ssrf.SSRFChecker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,10 +38,29 @@ public class HttpUtils {
 
     private final static Logger logger = LoggerFactory.getLogger(HttpUtils.class);
 
+    private final static String SSRF_BLOCKED = "[-] SSRF check failed";
+
+    /**
+     * Shared SSRF guard for every helper below: only http/https, no user-info, and the host must
+     * resolve exclusively to public addresses. Redirect following is disabled in every helper so a
+     * public URL can not bounce the request to an internal address after this check.
+     */
+    private static boolean isAllowedUrl(String url) {
+        if (!SSRFChecker.isPublicHttpUrl(url)) {
+            logger.error("Blocked url by SSRF check: {}", url);
+            return false;
+        }
+        return true;
+    }
+
     public static String commonHttpClient(String url) {
 
+        if (!isAllowedUrl(url)) {
+            return SSRF_BLOCKED;
+        }
         HttpClient client = new HttpClient();
         GetMethod method = new GetMethod(url);
+        method.setFollowRedirects(false);
 
         try {
             client.executeMethod(method); // send request
@@ -55,8 +77,12 @@ public class HttpUtils {
 
 
     public static String request(String url) {
+        if (!isAllowedUrl(url)) {
+            return SSRF_BLOCKED;
+        }
         try {
-            return Request.Get(url).execute().returnContent().toString();
+            CloseableHttpClient client = HttpClients.custom().disableRedirectHandling().build();
+            return Executor.newInstance(client).execute(Request.Get(url)).returnContent().toString();
         } catch (Exception e) {
             return e.getMessage();
         }
@@ -65,6 +91,10 @@ public class HttpUtils {
 
     public static String httpClient(String url) {
 
+        if (!isAllowedUrl(url)) {
+            return SSRF_BLOCKED;
+        }
+
         StringBuilder result = new StringBuilder();
 
         try {
@@ -72,7 +102,7 @@ public class HttpUtils {
             CloseableHttpClient client = HttpClients.createDefault();
             HttpGet httpGet = new HttpGet(url);
             // set redirect enable false
-            // httpGet.setConfig(RequestConfig.custom().setRedirectsEnabled(false).build());
+            httpGet.setConfig(RequestConfig.custom().setRedirectsEnabled(false).build());
             HttpResponse httpResponse = client.execute(httpGet); // send request
             BufferedReader rd = new BufferedReader(new InputStreamReader(httpResponse.getEntity().getContent()));
 
@@ -90,9 +120,15 @@ public class HttpUtils {
 
 
     public static String URLConnection(String url) {
+        if (!isAllowedUrl(url)) {
+            return SSRF_BLOCKED;
+        }
         try {
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
+            if (urlConnection instanceof HttpURLConnection) {
+                ((HttpURLConnection) urlConnection).setInstanceFollowRedirects(false);
+            }
             BufferedReader in = new BufferedReader(new InputStreamReader(urlConnection.getInputStream())); //send request
             String inputLine;
             StringBuilder html = new StringBuilder();
@@ -114,11 +150,14 @@ public class HttpUtils {
      * UserAgent is Java/1.8.0_102.
      */
     public static String HttpURLConnection(String url) {
+        if (!isAllowedUrl(url)) {
+            return SSRF_BLOCKED;
+        }
         try {
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
             HttpURLConnection conn = (HttpURLConnection) urlConnection;
-//             conn.setInstanceFollowRedirects(false);
+            conn.setInstanceFollowRedirects(false);
 //             Many HttpURLConnection methods can send http request, such as getResponseCode, getHeaderField
             InputStream is = conn.getInputStream();  // send request
             BufferedReader in = new BufferedReader(new InputStreamReader(is));
@@ -143,9 +182,12 @@ public class HttpUtils {
      * @param url http request url
      */
     public static String Jsoup(String url) {
+        if (!isAllowedUrl(url)) {
+            return SSRF_BLOCKED;
+        }
         try {
             Document doc = Jsoup.connect(url)
-//                    .followRedirects(false)
+                    .followRedirects(false)
                     .timeout(3000)
                     .cookie("name", "joychou") // request cookies
                     .execute().parse();
@@ -162,8 +204,12 @@ public class HttpUtils {
      * UserAgent is <code>okhttp/2.5.0</code>.
      */
     public static String okhttp(String url) throws IOException {
+        if (!isAllowedUrl(url)) {
+            return SSRF_BLOCKED;
+        }
         OkHttpClient client = new OkHttpClient();
-//         client.setFollowRedirects(false);
+        client.setFollowRedirects(false);
+        client.setFollowSslRedirects(false);
         com.squareup.okhttp.Request ok_http = new com.squareup.okhttp.Request.Builder().url(url).build();
         return client.newCall(ok_http).execute().body().string();
     }
@@ -177,9 +223,24 @@ public class HttpUtils {
      * @param url http request url
      */
     public static void imageIO(String url) {
+        if (!isAllowedUrl(url)) {
+            return;
+        }
         try {
             URL u = new URL(url);
-            ImageIO.read(u); // send request
+            // Only remote http(s) pictures are allowed; reject file:, jar:, etc. to avoid local file reads.
+            String protocol = u.getProtocol();
+            if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
+                logger.error("Illegal url protocol: {}", protocol);
+                return;
+            }
+            URLConnection conn = u.openConnection();
+            if (conn instanceof HttpURLConnection) {
+                ((HttpURLConnection) conn).setInstanceFollowRedirects(false);
+            }
+            try (InputStream in = conn.getInputStream()) { // send request
+                ImageIO.read(in);
+            }
         } catch (IOException e) {
             logger.error(e.getMessage());
         }
@@ -194,8 +255,15 @@ public class HttpUtils {
      * @param url http request url
      */
     public static void IOUtils(String url) {
+        if (!isAllowedUrl(url)) {
+            return;
+        }
         try {
-            IOUtils.toByteArray(URI.create(url));
+            URLConnection conn = URI.create(url).toURL().openConnection();
+            if (conn instanceof HttpURLConnection) {
+                ((HttpURLConnection) conn).setInstanceFollowRedirects(false);
+            }
+            IOUtils.toByteArray(conn);
         } catch (IOException e) {
             logger.error(e.getMessage());
         }
@@ -203,7 +271,12 @@ public class HttpUtils {
 
 
     public static String HttpAsyncClients(String url) {
-        CloseableHttpAsyncClient httpclient = HttpAsyncClients.createDefault();
+        if (!isAllowedUrl(url)) {
+            return SSRF_BLOCKED;
+        }
+        CloseableHttpAsyncClient httpclient = HttpAsyncClients.custom()
+                .setDefaultRequestConfig(RequestConfig.custom().setRedirectsEnabled(false).build())
+                .build();
         try {
             httpclient.start();
             final HttpGet request = new HttpGet(url);

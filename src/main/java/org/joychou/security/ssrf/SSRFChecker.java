@@ -1,6 +1,7 @@
 package org.joychou.security.ssrf;
 
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
@@ -132,17 +133,124 @@ public class SSRFChecker {
             return true;
         }
 
-        ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
-        for (String subnet : blackSubnets) {
-            SubnetUtils utils = new SubnetUtils(subnet);
-            if (utils.getInfo().isInRange(strIP)) {
-                logger.error("[-] SSRF check failed. Internal IP: " + strIP);
-                return true;
+        // Only IP literals are accepted here (no DNS lookup). Anything else fails closed.
+        if (!strIP.matches("^[0-9.]+$") && strIP.indexOf(':') < 0) {
+            logger.error("[-] SSRF check failed. Not an IP literal: " + strIP);
+            return true;
+        }
+
+        InetAddress address;
+        try {
+            address = InetAddress.getByName(strIP);
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Illegal IP: " + strIP);
+            return true;
+        }
+        return isInternalAddress(address);
+    }
+
+
+    /**
+     * Check a resolved address against the configured blocked subnets and the special-purpose
+     * ranges (loopback, any-local, link-local such as the 169.254.169.254 metadata service,
+     * site-local, multicast and IPv6 unique-local fc00::/7).
+     *
+     * @param address resolved address
+     * @return true if the address must not be reached from user-supplied URLs
+     */
+    private static boolean isInternalAddress(InetAddress address) {
+        String strIP = address.getHostAddress();
+
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress() || address.isMulticastAddress()) {
+            logger.error("[-] SSRF check failed. Internal IP: " + strIP);
+            return true;
+        }
+
+        byte[] raw = address.getAddress();
+        if (raw.length == 16 && (raw[0] & 0xFE) == 0xFC) {
+            logger.error("[-] SSRF check failed. Internal IP: " + strIP);
+            return true;
+        }
+
+        // SubnetUtils only understands IPv4.
+        if (address instanceof Inet4Address) {
+            ArrayList<String> blackSubnets = WebConfig.getSsrfBlockIps();
+            for (String subnet : blackSubnets) {
+                SubnetUtils utils = new SubnetUtils(subnet);
+                if (utils.getInfo().isInRange(strIP)) {
+                    logger.error("[-] SSRF check failed. Internal IP: " + strIP);
+                    return true;
+                }
             }
         }
 
         return false;
+    }
 
+
+    /**
+     * Validate a user-supplied URL before the server requests it: scheme must be http/https,
+     * the host must be parsed identically by {@link URI} and {@link URL} (no parser differential),
+     * no user-info, and every address the host resolves to must be a public address.
+     * Redirects are NOT checked here; callers must disable automatic redirect following.
+     *
+     * @param url user-supplied url
+     * @return true if the URL may be requested, false otherwise
+     */
+    public static boolean isPublicHttpUrl(String url) {
+        if (null == url) {
+            return false;
+        }
+        try {
+            URI uri = new URI(url);
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                return false;
+            }
+            String host = uri.getHost();
+            if (StringUtils.isEmpty(host) || uri.getRawUserInfo() != null) {
+                return false;
+            }
+            URL parsed = new URL(url);
+            if (!host.equalsIgnoreCase(parsed.getHost())) {
+                return false;
+            }
+            return isPublicHost(host);
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Illegal url: " + e.getMessage());
+            return false;
+        }
+    }
+
+
+    /**
+     * Resolve a host name (or IP literal) with the JDK resolver and check that every
+     * resulting address is public.
+     *
+     * @param host host name or IP literal
+     * @return true if all resolved addresses are public, false otherwise (fails closed)
+     */
+    public static boolean isPublicHost(String host) {
+        if (StringUtils.isEmpty(host)) {
+            return false;
+        }
+        try {
+            // The JDK resolver is the one that will connect later, so use its interpretation of the host.
+            InetAddress[] addresses = InetAddress.getAllByName(host); // send dns request
+            if (addresses.length == 0) {
+                return false;
+            }
+            for (InetAddress address : addresses) {
+                if (isInternalAddress(address)) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Illegal host: " + e.getMessage());
+            return false;
+        }
     }
 
 
@@ -292,7 +400,12 @@ public class SSRFChecker {
             // use URI instead of URL
             URI u = new URI(url);
             if (SecurityUtil.isHttp(url)) {
-                return u.getHost();
+                String host = u.getHost();
+                // Reject URL parser differentials: the host that is checked must be the host that is requested.
+                if (host == null || !host.equalsIgnoreCase(new URL(url).getHost())) {
+                    return "";
+                }
+                return host;
             }
             return "";
         } catch (Exception e) {
