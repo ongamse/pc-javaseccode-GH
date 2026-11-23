@@ -7,10 +7,16 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.List;
 
 
@@ -41,6 +47,49 @@ public class SQLI {
 
     @Resource
     private UserMapper userMapper;
+
+    private static final String ROLE_ADMIN = "ROLE_ADMIN";
+
+    /**
+     * Name of the authenticated caller, or null when there is no authenticated principal.
+     */
+    private static String currentUsername() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
+            return null;
+        }
+        return auth.getName();
+    }
+
+    private static boolean isAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) {
+            return false;
+        }
+        for (GrantedAuthority authority : auth.getAuthorities()) {
+            if (ROLE_ADMIN.equals(authority.getAuthority())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Object-level access check: a caller may only look up its own user record, admins may look up any.
+     * Fails closed (AccessDeniedException -> 403) for anonymous callers and for other users' records.
+     */
+    private static void requireSelfOrAdmin(String targetUsername) {
+        String current = currentUsername();
+        if (current == null) {
+            throw new AccessDeniedException("Authentication required");
+        }
+        if (isAdmin()) {
+            return;
+        }
+        if (targetUsername == null || !current.equals(targetUsername)) {
+            throw new AccessDeniedException("Access to the requested user record is denied");
+        }
+    }
 
 
     /**
@@ -95,6 +144,7 @@ public class SQLI {
     @RequestMapping("/jdbc/sec")
     public String jdbc_sqli_sec(@RequestParam("username") String username) {
 
+        requireSelfOrAdmin(username);
         StringBuilder result = new StringBuilder();
         try {
             Class.forName(driver);
@@ -182,6 +232,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln01")
     public List<User> mybatisVuln01(@RequestParam("username") String username) {
+        requireSelfOrAdmin(username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -192,7 +243,22 @@ public class SQLI {
      */
     @GetMapping("/mybatis/vuln02")
     public List<User> mybatisVuln02(@RequestParam("username") String username) {
-        return userMapper.findByUserNameVuln02(username);
+        String current = currentUsername();
+        if (current == null) {
+            throw new AccessDeniedException("Authentication required");
+        }
+        List<User> matches = userMapper.findByUserNameVuln02(username);
+        if (isAdmin()) {
+            return matches;
+        }
+        // LIKE search can enumerate other users; non-admins only get their own record back.
+        List<User> own = new ArrayList<>();
+        for (User u : matches) {
+            if (current.equals(u.getUsername())) {
+                own.add(u);
+            }
+        }
+        return own;
     }
 
     /**
@@ -212,6 +278,7 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec01")
     public User mybatisSec01(@RequestParam("username") String username) {
+        requireSelfOrAdmin(username);
         return userMapper.findByUserName(username);
     }
 
@@ -221,7 +288,13 @@ public class SQLI {
      */
     @GetMapping("/mybatis/sec02")
     public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+        User found = userMapper.findById(id);
+        if (found != null) {
+            requireSelfOrAdmin(found.getUsername());
+        } else {
+            requireSelfOrAdmin(null);
+        }
+        return found;
     }
 
 
