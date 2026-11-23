@@ -277,6 +277,35 @@ public class SecurityUtil {
     }
 
 
+    /**
+     * Validate an attacker-supplied redirect target (open redirect, CWE-601).
+     * Allowed: an absolute http(s) url whose host passes {@link #checkURL(String)} (domain allowlist),
+     * or a same-origin absolute path such as <code>/urlRedirect/test</code>.
+     * Rejected: protocol-relative (<code>//host</code>), backslash tricks, control characters,
+     * any other scheme.
+     *
+     * @param target the redirect target taken from the request
+     * @return the target when it is safe to redirect to; null otherwise
+     */
+    public static String safeRedirectTarget(String target) {
+        if (target == null || target.isEmpty() || target.length() > 2048) {
+            return null;
+        }
+        for (int i = 0; i < target.length(); i++) {
+            char ch = target.charAt(i);
+            if (Character.isISOControl(ch) || Character.isWhitespace(ch) || ch == '\\'
+                    || ch == 0x2028 || ch == 0x2029) {
+                return null;
+            }
+        }
+        if (target.charAt(0) == '/') {
+            // "//host" is protocol-relative and would leave the origin
+            return target.length() > 1 && target.charAt(1) == '/' ? null : target;
+        }
+        return checkURL(target);
+    }
+
+
     public static String cmdFilter(String input) {
         if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
