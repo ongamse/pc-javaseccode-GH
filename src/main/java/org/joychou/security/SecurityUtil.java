@@ -12,12 +12,18 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Set<String> SAFE_COMMANDS = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList("whoami", "id", "date", "pwd", "uname", "hostname", "uptime")));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -230,11 +236,31 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (null == input || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    /**
+     * Resolve an attacker-supplied command name against a strict allowlist of
+     * argument-less, read-only programs. The result is meant to be passed as argv to
+     * ProcessBuilder (never to a shell).
+     *
+     * @param cmd command name supplied by the user
+     * @return argv array for an allowlisted command, otherwise null
+     */
+    public static String[] safeCommand(String cmd) {
+        if (null == cmd) {
+            return null;
+        }
+        String name = cmd.trim();
+        if (!SAFE_COMMANDS.contains(name)) {
+            return null;
+        }
+        return new String[]{name};
     }
 
 
