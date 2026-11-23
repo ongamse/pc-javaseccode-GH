@@ -8,8 +8,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -53,6 +55,13 @@ public class SecurityUtil {
                 || !jdbcUrl.startsWith("jdbc:" + driver + "://")) {
             throw new IllegalArgumentException("Invalid jdbc url");
         }
+        // The driver opens a socket to this host: do not allow loopback / private / link-local targets.
+        String hostPort = jdbcUrl.substring(jdbcUrl.indexOf("://") + 3, jdbcUrl.lastIndexOf('/'));
+        int colon = hostPort.indexOf(':');
+        String host = colon < 0 ? hostPort : hostPort.substring(0, colon);
+        if (!SSRFChecker.isPublicHost(host)) {
+            throw new IllegalArgumentException("Invalid jdbc url");
+        }
         return jdbcUrl;
     }
 
@@ -77,8 +86,17 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
-        } catch (URISyntaxException e) {
+            String host = uri.getHost();
+            if (host == null) {
+                return "";
+            }
+            // Reject URL parser differentials (e.g. backslash / userinfo tricks): the host that is
+            // checked against the allow/block lists must be the host java.net.URL will connect to.
+            if (!host.equalsIgnoreCase(new URL(url).getHost())) {
+                return "";
+            }
+            return host.toLowerCase();
+        } catch (URISyntaxException | MalformedURLException e) {
             return "";
         }
     }
