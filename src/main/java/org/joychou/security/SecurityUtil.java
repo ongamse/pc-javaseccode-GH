@@ -22,6 +22,36 @@ public class SecurityUtil {
 
 
     /**
+     * Strict JDBC URL allowlist: only jdbc:postgresql / jdbc:db2 with plain host[:port]/database.
+     * No query string, no ';' / ':' properties, so driver-level gadget properties
+     * (socketFactory, sslfactory, loggerFile, ...) can not be injected.
+     */
+    private static final Pattern SAFE_JDBC_URL_PATTERN = Pattern.compile(
+            "^jdbc:(postgresql|db2)://[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?/[A-Za-z0-9_-]{1,64}$");
+
+    /**
+     * Decode an attacker-supplied Base64 JDBC URL and validate it against a strict allowlist.
+     *
+     * @param jdbcUrlBase64 Base64 encoded JDBC url
+     * @param driver expected driver, "postgresql" or "db2"
+     * @return the decoded and validated JDBC url
+     * @throws IllegalArgumentException if the input is not valid Base64 or the URL is not allowed
+     */
+    public static String decodeSafeJdbcUrl(String jdbcUrlBase64, String driver) {
+        if (jdbcUrlBase64 == null || jdbcUrlBase64.length() > 1024) {
+            throw new IllegalArgumentException("Invalid jdbc url");
+        }
+        String jdbcUrl = new String(java.util.Base64.getDecoder().decode(jdbcUrlBase64),
+                java.nio.charset.StandardCharsets.UTF_8);
+        if (!SAFE_JDBC_URL_PATTERN.matcher(jdbcUrl).matches()
+                || !jdbcUrl.startsWith("jdbc:" + driver + "://")) {
+            throw new IllegalArgumentException("Invalid jdbc url");
+        }
+        return jdbcUrl;
+    }
+
+
+    /**
      * Determine if the URL starts with HTTP.
      *
      * @param url url

@@ -4,6 +4,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.util.Collections;
+import java.util.Set;
 
 /**
  * RASP：Hook java/io/ObjectInputStream类的resolveClass方法
@@ -14,6 +16,9 @@ import java.io.*;
 public class AntObjectInputStream extends ObjectInputStream {
 
     protected final Logger logger= LoggerFactory.getLogger(AntObjectInputStream.class);
+
+    private static final Set<String> ALLOW_CLASSES = Collections.singleton(
+            "org.joychou.security.AntObjectInputStream$MyObject");
 
     public AntObjectInputStream(InputStream inputStream) throws IOException {
         super(inputStream);
@@ -44,6 +49,11 @@ public class AntObjectInputStream extends ObjectInputStream {
             if (className.startsWith(denyClass)) {
                 throw new InvalidClassException("Unauthorized deserialization attempt", className);
             }
+        }
+
+        // Allowlist: only the application's own safe value class may be deserialized.
+        if (!ALLOW_CLASSES.contains(className)) {
+            throw new InvalidClassException("Unauthorized deserialization attempt", className);
         }
 
         return super.resolveClass(desc);
