@@ -1,6 +1,7 @@
 package org.joychou.controller;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.util.HtmlUtils;
 import org.joychou.util.CookieUtils;
 import org.joychou.util.JwtUtils;
 import org.springframework.web.bind.annotation.CookieValue;
@@ -56,7 +57,7 @@ public class Jwt {
     @GetMapping("/getName")
     public String getNickname(@CookieValue(COOKIE_NAME) String user_cookie) {
         String nickname = JwtUtils.getNicknameByJavaJwt(user_cookie);
-        return "Current jwt user is " + nickname;
+        return "Current jwt user is " + HtmlUtils.htmlEscape(nickname);
     }
 
 }

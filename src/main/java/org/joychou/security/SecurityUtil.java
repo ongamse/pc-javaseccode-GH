@@ -12,12 +12,19 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern HEADER_UNSAFE_PATTERN =
+            Pattern.compile("[\\r\\n\\u0000\\u0085\\u2028\\u2029]|%0[dDaA]|%00");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "pwd", "date", "id", "uname", "hostname", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -209,6 +216,31 @@ public class SecurityUtil {
 
 
     /**
+     * Split a user supplied command line into an argv array (no shell involved).
+     * The executable must be in a fixed allowlist and every argument must match
+     * <code>a-zA-Z0-9_/.-</code>.
+     *
+     * @param cmd user supplied command line
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] cmdArgv(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (!FILTER_PATTERN.matcher(argv[i]).matches()) {
+                return null;
+            }
+        }
+        return argv;
+    }
+
+
+    /**
      * 过滤mybatis中order by不能用#的情况。
      * 严格限制用户输入只能包含<code>a-zA-Z0-9_-.</code>字符。
      *
@@ -247,6 +279,27 @@ public class SecurityUtil {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Remove CR, LF, NUL and their percent-encoded forms (<code>%0d</code>, <code>%0a</code>,
+     * <code>%00</code>) from a value that will be written into an HTTP response header,
+     * to prevent CRLF / response splitting header injection.
+     *
+     * @param value attacker-controlled header value (may be null)
+     * @return value without line-break characters, or null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        String prev;
+        String result = value;
+        do {
+            prev = result;
+            result = HEADER_UNSAFE_PATTERN.matcher(result).replaceAll("");
+        } while (!result.equals(prev));
+        return result;
     }
 
     public static void main(String[] args) {

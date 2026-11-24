@@ -1,6 +1,7 @@
 package org.joychou.controller;
 
 import com.fasterxml.uuid.Generators;
+import org.springframework.web.util.HtmlUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
@@ -59,12 +60,15 @@ public class FileUpload {
         try {
             // Get the file and save it somewhere
             byte[] bytes = file.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + file.getOriginalFilename());
+            Path path = resolveUploadPath(file.getOriginalFilename());
             Files.write(path, bytes);
 
             redirectAttributes.addFlashAttribute("message",
-                    "You successfully uploaded '" + UPLOADED_FOLDER + file.getOriginalFilename() + "'");
+                    "You successfully uploaded '" + path + "'");
 
+        } catch (IllegalArgumentException e) {
+            redirectAttributes.addFlashAttribute("message", "Illegal file name");
+            logger.error("Illegal upload file name");
         } catch (IOException e) {
             redirectAttributes.addFlashAttribute("message", "upload failed");
             logger.error(e.toString());
@@ -86,10 +90,17 @@ public class FileUpload {
             return "Please select a file to upload";
         }
 
-        String fileName = multifile.getOriginalFilename();
+        String fileName;
+        try {
+            // Strip any directory components and reject unsafe names
+            fileName = safeFileName(multifile.getOriginalFilename());
+        } catch (IllegalArgumentException e) {
+            logger.error("Illegal upload file name");
+            return "Upload failed. Illegal file name.";
+        }
         String Suffix = fileName.substring(fileName.lastIndexOf(".")); // 获取文件后缀名
         String mimeType = multifile.getContentType(); // 获取MIME类型
-        String filePath = UPLOADED_FOLDER + fileName;
+        String filePath = resolveUploadPath(fileName).toString();
         File excelFile = convert(multifile);
 
 
@@ -141,7 +152,7 @@ public class FileUpload {
         try {
             // Get the file and save it somewhere
             byte[] bytes = multifile.getBytes();
-            Path path = Paths.get(UPLOADED_FOLDER + multifile.getOriginalFilename());
+            Path path = resolveUploadPath(fileName);
             Files.write(path, bytes);
         } catch (IOException e) {
             logger.error(e.toString());
@@ -151,11 +162,16 @@ public class FileUpload {
 
         logger.info("[+] Safe file. Suffix: {}, MIME: {}", Suffix, mimeType);
         logger.info("[+] Successfully uploaded {}", filePath);
-        return String.format("You successfully uploaded '%s'", filePath);
+        return String.format("You successfully uploaded '%s'", HtmlUtils.htmlEscape(filePath));
     }
 
     private void deleteFile(String filePath) {
-        File delFile = new File(filePath);
+        Path delPath = Paths.get(filePath).toAbsolutePath().normalize();
+        if (!delPath.startsWith(uploadBase())) {
+            logger.info("Refusing to delete a file outside the upload folder");
+            return;
+        }
+        File delFile = delPath.toFile();
         if(delFile.isFile() && delFile.exists()) {
             if (delFile.delete()) {
                 logger.info("[+] " + filePath + " delete successfully!");
@@ -172,10 +188,10 @@ public class FileUpload {
      * https://stackoverflow.com/questions/24339990/how-to-convert-a-multipart-file-to-file
      */
     private File convert(MultipartFile multiFile) throws Exception {
-        String fileName = multiFile.getOriginalFilename();
+        String fileName = safeFileName(multiFile.getOriginalFilename());
         String suffix = fileName.substring(fileName.lastIndexOf("."));
         UUID uuid = Generators.timeBasedGenerator().generate();
-        randomFilePath = UPLOADED_FOLDER + uuid + suffix;
+        randomFilePath = resolveUploadPath(uuid + suffix).toString();
         // 随机生成一个同后缀名的文件
         File convFile = new File(randomFilePath);
         boolean ret = convFile.createNewFile();
@@ -192,7 +208,42 @@ public class FileUpload {
      * Check if the file is a picture.
      */
     private static boolean isImage(File file) throws IOException {
+        if (!file.toPath().toAbsolutePath().normalize().startsWith(uploadBase())) {
+            throw new IOException("File is outside the upload folder");
+        }
         BufferedImage bi = ImageIO.read(file);
         return bi != null;
+    }
+
+    private static Path uploadBase() {
+        return Paths.get(UPLOADED_FOLDER).toAbsolutePath().normalize();
+    }
+
+    /**
+     * Reduce a client-supplied file name to a bare file name.
+     * Directory components are dropped; empty, dot-only and NUL-containing names are rejected.
+     */
+    private static String safeFileName(String originalName) {
+        if (originalName == null || originalName.indexOf('\0') >= 0) {
+            throw new IllegalArgumentException("Illegal file name");
+        }
+        String name = originalName.replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1);
+        if (name.isEmpty() || ".".equals(name) || "..".equals(name)) {
+            throw new IllegalArgumentException("Illegal file name");
+        }
+        return name;
+    }
+
+    /**
+     * Resolve a client-supplied file name inside the upload folder, rejecting any escape.
+     */
+    private static Path resolveUploadPath(String originalName) {
+        Path base = uploadBase();
+        Path resolved = base.resolve(safeFileName(originalName)).normalize();
+        if (!resolved.startsWith(base) || resolved.equals(base)) {
+            throw new IllegalArgumentException("Illegal file name");
+        }
+        return resolved;
     }
 }

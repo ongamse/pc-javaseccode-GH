@@ -131,6 +131,9 @@ public class Jsonp {
 
         String callback = request.getParameter("fastjsonpCallback");
         if (StringUtils.isNotBlank(callback)) {
+            if (!WebUtils.isValidJsonpCallback(callback)) {
+                throw new IllegalArgumentException("Illegal jsonp callback");
+            }
             JSONPObject jsonpObj = new JSONPObject(callback);
             jsonpObj.addParameter(csrfToken);
             return jsonpObj.toString();
