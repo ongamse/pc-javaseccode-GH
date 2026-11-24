@@ -10,6 +10,7 @@ import javax.servlet.RequestDispatcher;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.regex.Pattern;
 
 import org.joychou.security.SecurityUtil;
 
@@ -25,12 +26,33 @@ import org.joychou.security.SecurityUtil;
 @RequestMapping("/urlRedirect")
 public class URLRedirect {
 
+    private static final Pattern SAME_ORIGIN_PATH = Pattern.compile("^/(?![/\\\\])[^\\x00-\\x20\\x7f\\\\]*$");
+
     /**
      * http://localhost:8080/urlRedirect/redirect?url=http://www.baidu.com
      */
     @GetMapping("/redirect")
     public String redirect(@RequestParam("url") String url) {
+        if (!isSafeRedirectTarget(url)) {
+            return "redirect:/";
+        }
         return "redirect:" + url;
+    }
+
+
+    /**
+     * A redirect target is safe if it is an http(s) url whose host passes the
+     * trusted-domain check in {@link SecurityUtil#checkURL(String)}, or a same-origin
+     * absolute path (starts with a single "/", no backslash, no whitespace/control chars).
+     */
+    private static boolean isSafeRedirectTarget(String url) {
+        if (url == null) {
+            return false;
+        }
+        if (SecurityUtil.checkURL(url) != null) {
+            return true;
+        }
+        return SAME_ORIGIN_PATH.matcher(url).matches();
     }
 
 
@@ -41,6 +63,10 @@ public class URLRedirect {
     @ResponseBody
     public static void setHeader(HttpServletRequest request, HttpServletResponse response) {
         String url = request.getParameter("url");
+        if (!isSafeRedirectTarget(url)) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
         response.setStatus(HttpServletResponse.SC_MOVED_PERMANENTLY); // 301 redirect
         response.setHeader("Location", SecurityUtil.sanitizeHeaderValue(url));
     }
@@ -53,6 +79,10 @@ public class URLRedirect {
     @ResponseBody
     public static void sendRedirect(HttpServletRequest request, HttpServletResponse response) throws IOException {
         String url = request.getParameter("url");
+        if (!isSafeRedirectTarget(url)) {
+            response.sendError(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
         response.sendRedirect(url); // 302 redirect
     }
 
