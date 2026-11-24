@@ -50,8 +50,8 @@ public class SSRF {
     @GetMapping("/urlConnection/sec")
     public String URLConnectionSec(String url) {
 
-        // Decline not http/https protocol
-        if (!SecurityUtil.isHttp(url)) {
+        // Decline not http/https protocol and urls resolving to internal IPs
+        if (!SecurityUtil.isHttp(url) || !SecurityUtil.checkSSRFWithoutRedirect(url)) {
             return "[-] SSRF check failed";
         }
 
@@ -117,6 +117,12 @@ public class SSRF {
      */
     @GetMapping("/openStream")
     public void openStream(@RequestParam String url, HttpServletResponse response) throws IOException {
+        // Only http/https urls whose host resolves to a non-internal IP.
+        if (!SecurityUtil.checkSSRFWithoutRedirect(url)) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "[-] SSRF check failed");
+            return;
+        }
+
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try {
@@ -127,7 +133,10 @@ public class SSRF {
             URL u = new URL(url);
             int length;
             byte[] bytes = new byte[1024];
-            inputStream = u.openStream(); // send request
+            // Do not follow redirects: a redirect target would bypass the check above.
+            HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            inputStream = conn.getInputStream(); // send request
             outputStream = response.getOutputStream();
             while ((length = inputStream.read(bytes)) > 0) {
                 outputStream.write(bytes, 0, length);
