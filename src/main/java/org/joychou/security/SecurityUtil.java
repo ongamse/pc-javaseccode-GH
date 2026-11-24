@@ -21,6 +21,8 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Pattern HEADER_UNSAFE_PATTERN =
+            Pattern.compile("[\\r\\n\\u0000\\u0085\\u2028\\u2029]|%0[dDaA]|%00");
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
             Arrays.asList("whoami", "pwd", "date", "id", "uname", "hostname", "ls"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
@@ -277,6 +279,27 @@ public class SecurityUtil {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Remove CR, LF, NUL and their percent-encoded forms (<code>%0d</code>, <code>%0a</code>,
+     * <code>%00</code>) from a value that will be written into an HTTP response header,
+     * to prevent CRLF / response splitting header injection.
+     *
+     * @param value attacker-controlled header value (may be null)
+     * @return value without line-break characters, or null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        String prev;
+        String result = value;
+        do {
+            prev = result;
+            result = HEADER_UNSAFE_PATTERN.matcher(result).replaceAll("");
+        } while (!result.equals(prev));
+        return result;
     }
 
     public static void main(String[] args) {
