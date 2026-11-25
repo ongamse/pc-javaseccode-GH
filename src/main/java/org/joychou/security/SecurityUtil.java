@@ -28,7 +28,7 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
+        return null != url && (url.startsWith("http://") || url.startsWith("https://"));
     }
 
 
@@ -41,7 +41,8 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            return null == host ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
@@ -143,7 +144,7 @@ public class SecurityUtil {
      * @return Safe url returns true. Dangerous url returns false.
      */
     public static boolean checkSSRFWithoutRedirect(String url) {
-        if(url == null) {
+        if(url == null || !SSRFChecker.isSafeUrl(url)) {
             return false;
         }
         return !SSRFChecker.isInternalIpByUrl(url);
@@ -247,6 +248,68 @@ public class SecurityUtil {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Remove CR, LF and other control characters from a value that will be written
+     * into an HTTP response header, to prevent header injection / response splitting.
+     *
+     * @param value untrusted header value
+     * @return the value without control characters; null if value is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (ch == '\t' || (ch >= 0x20 && ch != 0x7f)) {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Validate a CORS request Origin against the safe domain list ({@link #checkURL(String)}).
+     * Fails closed: null, empty, the literal "null" origin, values containing control characters
+     * and non-allowlisted origins all return null.
+     *
+     * @param origin untrusted value of the Origin request header
+     * @return the origin if it is allowlisted; null otherwise
+     */
+    public static String checkCorsOrigin(String origin) {
+        if (origin == null || origin.isEmpty() || "null".equalsIgnoreCase(origin)
+                || !origin.equals(sanitizeHeaderValue(origin))) {
+            return null;
+        }
+        return checkURL(origin);
+    }
+
+    /**
+     * Validate a redirect target. Only a same-origin relative path (a single leading slash) or an
+     * absolute http/https url whose host is in the safe domain list ({@link #checkURL(String)}) and is
+     * parsed identically by java.net.URI and java.net.URL is accepted. Fails closed.
+     *
+     * @param url untrusted redirect target
+     * @return the original url if it is a trusted redirect target; null otherwise
+     */
+    public static String safeRedirectUrl(String url) {
+        if (url == null || url.isEmpty() || !url.equals(sanitizeHeaderValue(url))) {
+            return null;
+        }
+        if (url.startsWith("/")) {
+            // Reject protocol-relative ("//host") and backslash ("/\host") forms that browsers treat as absolute.
+            if (url.startsWith("//") || url.startsWith("/\\") || url.indexOf('\\') != -1) {
+                return null;
+            }
+            return url;
+        }
+        if (!SSRFChecker.isSafeUrl(url) || checkURL(url) == null) {
+            return null;
+        }
+        return url;
     }
 
     public static void main(String[] args) {

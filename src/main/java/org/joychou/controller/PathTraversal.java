@@ -11,6 +11,8 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 
 @RestController
@@ -40,9 +42,31 @@ public class PathTraversal {
         logger.info("Working directory: " + System.getProperty("user.dir"));
         logger.info("File path: " + imgFile);
 
-        File f = new File(imgFile);
+        if (imgFile == null || imgFile.indexOf('\0') >= 0) {
+            return "File doesn't exist or is not a file.";
+        }
+
+        // Contain access to the working directory: resolve, canonicalize
+        // (follows symlinks) and verify the result stays under the base dir.
+        Path base = Paths.get(System.getProperty("user.dir")).toRealPath();
+        Path target;
+        try {
+            Path candidate = base.resolve(imgFile).normalize();
+            if (!candidate.startsWith(base) || !Files.exists(candidate)) {
+                return "File doesn't exist or is not a file.";
+            }
+            target = candidate.toRealPath();
+        } catch (InvalidPathException e) {
+            return "File doesn't exist or is not a file.";
+        }
+        if (!target.startsWith(base)) {
+            logger.info("Illegal file path: " + imgFile);
+            return "Bad boy. Illegal file path.";
+        }
+
+        File f = target.toFile();
         if (f.exists() && !f.isDirectory()) {
-            byte[] data = Files.readAllBytes(Paths.get(imgFile));
+            byte[] data = Files.readAllBytes(target);
             return new String(Base64.encodeBase64(data));
         } else {
             return "File doesn't exist or is not a file.";

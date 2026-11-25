@@ -31,14 +31,13 @@ public class IPForge {
     @RequestMapping("/proxy")
     @ResponseBody
     public static String proxy(HttpServletRequest request) {
-        String ip = request.getHeader("X-Real-IP");
-        if (StringUtils.isNotBlank(ip)) {
-            return ip;
-        } else {
-            String remoteAddr = request.getRemoteAddr();
-            if (StringUtils.isNotBlank(remoteAddr)) {
-                return remoteAddr;
-            }
+        // Client-supplied headers (X-Real-IP / X-Forwarded-For) are spoofable, so they are
+        // not trusted for client identity. Use the socket peer address; behind a trusted
+        // proxy, configure the container (e.g. server.tomcat.remoteip / RemoteIpFilter)
+        // so getRemoteAddr() reflects the real client.
+        String remoteAddr = request.getRemoteAddr();
+        if (StringUtils.isNotBlank(remoteAddr)) {
+            return remoteAddr;
         }
         return "";
     }

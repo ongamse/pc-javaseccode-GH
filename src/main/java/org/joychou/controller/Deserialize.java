@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 import org.joychou.config.Constants;
 import org.joychou.security.AntObjectInputStream;
+import org.joychou.util.SafeBase64;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -12,8 +13,6 @@ import javax.servlet.http.HttpServletRequest;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
-import java.io.ObjectInputStream;
-import java.util.Base64;
 
 import static org.springframework.web.util.WebUtils.getCookie;
 
@@ -27,6 +26,9 @@ import static org.springframework.web.util.WebUtils.getCookie;
 public class Deserialize {
 
     protected final Logger logger = LoggerFactory.getLogger(this.getClass());
+
+    // Cookies are capped by browsers at about 4 KB; bound untrusted input before decoding.
+    private static final int MAX_COOKIE_BASE64_LENGTH = 8192;
 
     /**
      * java -jar ysoserial.jar CommonsCollections5 "open -a Calculator" | base64 <br>
@@ -42,12 +44,16 @@ public class Deserialize {
         }
 
         String rememberMe = cookie.getValue();
-        byte[] decoded = Base64.getDecoder().decode(rememberMe);
+        byte[] decoded = SafeBase64.decode(rememberMe, MAX_COOKIE_BASE64_LENGTH);
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
-        ObjectInputStream in = new ObjectInputStream(bytes);
-        in.readObject();
-        in.close();
+        // Allowlisted ObjectInputStream: rejects gadget classes with InvalidClassException.
+        try (AntObjectInputStream in = new AntObjectInputStream(bytes)) {
+            in.readObject();
+        } catch (InvalidClassException e) {
+            logger.info(e.toString());
+            return e.toString();
+        }
 
         return "Are u ok?";
     }
@@ -67,7 +73,7 @@ public class Deserialize {
             return "No rememberMe cookie. Right?";
         }
         String rememberMe = cookie.getValue();
-        byte[] decoded = Base64.getDecoder().decode(rememberMe);
+        byte[] decoded = SafeBase64.decode(rememberMe, MAX_COOKIE_BASE64_LENGTH);
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
 
