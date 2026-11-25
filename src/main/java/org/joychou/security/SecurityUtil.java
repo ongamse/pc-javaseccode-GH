@@ -272,6 +272,22 @@ public class SecurityUtil {
     }
 
     /**
+     * Validate a CORS request Origin against the safe domain list ({@link #checkURL(String)}).
+     * Fails closed: null, empty, the literal "null" origin, values containing control characters
+     * and non-allowlisted origins all return null.
+     *
+     * @param origin untrusted value of the Origin request header
+     * @return the origin if it is allowlisted; null otherwise
+     */
+    public static String checkCorsOrigin(String origin) {
+        if (origin == null || origin.isEmpty() || "null".equalsIgnoreCase(origin)
+                || !origin.equals(sanitizeHeaderValue(origin))) {
+            return null;
+        }
+        return checkURL(origin);
+    }
+
+    /**
      * Validate a redirect target. Only a same-origin relative path (a single leading slash) or an
      * absolute http/https url whose host is in the safe domain list ({@link #checkURL(String)}) and is
      * parsed identically by java.net.URI and java.net.URL is accepted. Fails closed.
