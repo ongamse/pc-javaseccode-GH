@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 
 
 @RestController
@@ -23,9 +25,31 @@ public class XStreamRce {
     @PostMapping("/xstream")
     public String parseXml(HttpServletRequest request) throws Exception {
         String xml = WebUtils.getRequestBody(request);
-        XStream xstream = new XStream(new DomDriver());
+        XStream xstream = new XStream(secureDomDriver());
         xstream.fromXML(xml);
         return "xstream";
+    }
+
+    /**
+     * DomDriver whose DocumentBuilderFactory rejects DOCTYPE declarations and external entities (XXE).
+     */
+    private static DomDriver secureDomDriver() {
+        return new DomDriver() {
+            @Override
+            protected DocumentBuilderFactory createDocumentBuilderFactory() {
+                DocumentBuilderFactory dbf = super.createDocumentBuilderFactory();
+                try {
+                    dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                    dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+                    dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                    dbf.setXIncludeAware(false);
+                    dbf.setExpandEntityReferences(false);
+                } catch (ParserConfigurationException e) {
+                    throw new IllegalStateException("Unable to secure XML parser against XXE", e);
+                }
+                return dbf;
+            }
+        };
     }
 
     public static void main(String[] args) {
