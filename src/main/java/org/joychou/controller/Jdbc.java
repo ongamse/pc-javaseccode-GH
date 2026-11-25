@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import org.joychou.security.ssrf.SSRFChecker;
 import org.joychou.util.SafeBase64;
 
 import java.nio.charset.StandardCharsets;
@@ -31,6 +32,12 @@ public class Jdbc {
         String jdbcUrl = new String(b, StandardCharsets.UTF_8);
         if (!jdbcUrl.startsWith(requiredPrefix)) {
             throw new IllegalArgumentException("Unsupported JDBC URL scheme");
+        }
+        // Validate the destination host: map "jdbc:<driver>://host..." to a hierarchical URL and
+        // reject unparsable hosts and loopback / link-local / private / blocked addresses.
+        String hostUrl = "http:" + jdbcUrl.substring(requiredPrefix.length());
+        if (!SSRFChecker.isSafeUrl(hostUrl) || SSRFChecker.isInternalIpByUrl(hostUrl)) {
+            throw new IllegalArgumentException("Illegal JDBC host");
         }
         return jdbcUrl;
     }

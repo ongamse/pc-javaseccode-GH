@@ -71,10 +71,18 @@ public class SSRFChecker {
                     return false;  // 内网ip直接return，非内网ip继续判断是否有重定向
                 }
 
+                // Only http/https destinations whose hosts agree across URI and URL parsers
+                // are ever opened; isInternalIpByUrl() above already rejected non-http(s) urls.
+                if (!isSafeUrl(finalUrl)) {
+                    logger.error("[-] SSRF check failed. Illegal url.");
+                    return false;
+                }
+
                 connection = (HttpURLConnection) new URL(finalUrl).openConnection();
                 connection.setInstanceFollowRedirects(false);
                 connection.setUseCaches(false); // 设置为false，手动处理跳转，可以拿到每个跳转的URL
                 connection.setConnectTimeout(connectTime);
+                connection.setReadTimeout(connectTime);
                 //connection.setRequestMethod("GET");
                 connection.connect(); // send dns request
                 int responseCode = connection.getResponseCode(); // 发起网络请求
@@ -82,7 +90,8 @@ public class SSRFChecker {
                     String redirectedUrl = connection.getHeaderField("Location");
                     if (null == redirectedUrl)
                         break;
-                    finalUrl = redirectedUrl;
+                    // Location may be relative; resolve it against the current url so that it is checked too.
+                    finalUrl = new URL(new URL(finalUrl), redirectedUrl).toString();
                     i += 1;  // 重定向次数加1
                     logger.info("redirected url: " + finalUrl);
                     if (i == checkTimes) {
@@ -129,6 +138,20 @@ public class SSRFChecker {
     public static boolean isInternalIp(String strIP) {
         if (StringUtils.isEmpty(strIP)) {
             logger.error("[-] SSRF check failed. IP is empty. " + strIP);
+            return true;
+        }
+
+        // Always block loopback, link-local (169.254.0.0/16 cloud metadata, fe80::/10), site-local,
+        // wildcard and multicast addresses, including IPv6, regardless of the configured subnets.
+        try {
+            InetAddress addr = InetAddress.getByName(strIP);
+            if (addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+                    || addr.isSiteLocalAddress() || addr.isMulticastAddress()) {
+                logger.error("[-] SSRF check failed. Internal IP: " + strIP);
+                return true;
+            }
+        } catch (Exception e) {
+            logger.error("[-] SSRF check failed. Illegal IP: " + strIP);
             return true;
         }
 
@@ -292,11 +315,32 @@ public class SSRFChecker {
             // use URI instead of URL
             URI u = new URI(url);
             if (SecurityUtil.isHttp(url)) {
-                return u.getHost();
+                String host = u.getHost();
+                return null == host ? "" : host;
             }
             return "";
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    /**
+     * Check that the url is http/https and that java.net.URI and java.net.URL parse the same host.
+     * The two parsers disagree on inputs such as <code>http://a.com\@b.com</code>, which would let the
+     * host that was checked differ from the host that is actually requested.
+     *
+     * @return true if the url can be safely requested after the ip check, otherwise false.
+     */
+    public static boolean isSafeUrl(String url) {
+        if (null == url || !SecurityUtil.isHttp(url)) {
+            return false;
+        }
+        try {
+            String uriHost = new URI(url).getHost();
+            String urlHost = new URL(url).getHost();
+            return null != uriHost && !uriHost.isEmpty() && uriHost.equalsIgnoreCase(urlHost);
+        } catch (Exception e) {
+            return false;
         }
     }
 

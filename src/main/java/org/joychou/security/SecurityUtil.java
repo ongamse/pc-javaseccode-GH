@@ -28,7 +28,7 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
+        return null != url && (url.startsWith("http://") || url.startsWith("https://"));
     }
 
 
@@ -41,7 +41,8 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
+            String host = uri.getHost();
+            return null == host ? "" : host.toLowerCase();
         } catch (URISyntaxException e) {
             return "";
         }
@@ -143,7 +144,7 @@ public class SecurityUtil {
      * @return Safe url returns true. Dangerous url returns false.
      */
     public static boolean checkSSRFWithoutRedirect(String url) {
-        if(url == null) {
+        if(url == null || !SSRFChecker.isSafeUrl(url)) {
             return false;
         }
         return !SSRFChecker.isInternalIpByUrl(url);

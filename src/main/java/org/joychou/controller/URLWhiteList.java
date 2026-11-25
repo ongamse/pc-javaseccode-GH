@@ -2,6 +2,7 @@ package org.joychou.controller;
 
 
 import org.joychou.security.SecurityUtil;
+import org.joychou.security.ssrf.SSRFChecker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -101,18 +102,21 @@ public class URLWhiteList {
 
         logger.info("url:  " + url);
 
-        if (!SecurityUtil.isHttp(url)) {
+        // Only http/https, and the host must be parsed identically by java.net.URI and java.net.URL,
+        // otherwise the checked host differs from the host the redirect target resolves to.
+        if (!SecurityUtil.isHttp(url) || !SSRFChecker.isSafeUrl(url)) {
             return;
         }
 
         URL u = new URL(url);
-        String host = u.getHost();
+        String host = u.getHost().toLowerCase();
         logger.info("host:  " + host);
 
         // endsWith .
         for (String domain : domainwhitelist) {
             if (host.endsWith("." + domain)) {
                 res.sendRedirect(url);
+                return;
             }
         }
 
