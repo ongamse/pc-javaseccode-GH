@@ -271,6 +271,31 @@ public class SecurityUtil {
         return sb.toString();
     }
 
+    /**
+     * Validate a redirect target. Only a same-origin relative path (a single leading slash) or an
+     * absolute http/https url whose host is in the safe domain list ({@link #checkURL(String)}) and is
+     * parsed identically by java.net.URI and java.net.URL is accepted. Fails closed.
+     *
+     * @param url untrusted redirect target
+     * @return the original url if it is a trusted redirect target; null otherwise
+     */
+    public static String safeRedirectUrl(String url) {
+        if (url == null || url.isEmpty() || !url.equals(sanitizeHeaderValue(url))) {
+            return null;
+        }
+        if (url.startsWith("/")) {
+            // Reject protocol-relative ("//host") and backslash ("/\host") forms that browsers treat as absolute.
+            if (url.startsWith("//") || url.startsWith("/\\") || url.indexOf('\\') != -1) {
+                return null;
+            }
+            return url;
+        }
+        if (!SSRFChecker.isSafeUrl(url) || checkURL(url) == null) {
+            return null;
+        }
+        return url;
+    }
+
     public static void main(String[] args) {
     }
 
