@@ -13,7 +13,6 @@ import javax.servlet.http.HttpServletRequest;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
-import java.io.ObjectInputStream;
 
 import static org.springframework.web.util.WebUtils.getCookie;
 
@@ -48,9 +47,13 @@ public class Deserialize {
         byte[] decoded = SafeBase64.decode(rememberMe, MAX_COOKIE_BASE64_LENGTH);
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
-        ObjectInputStream in = new ObjectInputStream(bytes);
-        in.readObject();
-        in.close();
+        // Allowlisted ObjectInputStream: rejects gadget classes with InvalidClassException.
+        try (AntObjectInputStream in = new AntObjectInputStream(bytes)) {
+            in.readObject();
+        } catch (InvalidClassException e) {
+            logger.info(e.toString());
+            return e.toString();
+        }
 
         return "Are u ok?";
     }
