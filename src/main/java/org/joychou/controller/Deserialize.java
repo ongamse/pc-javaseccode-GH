@@ -48,9 +48,13 @@ public class Deserialize {
         byte[] decoded = Base64Utils.decodeBounded(rememberMe, MAX_COOKIE_B64_LENGTH);
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
-        ObjectInputStream in = new ObjectInputStream(bytes);
-        in.readObject();
-        in.close();
+        // Allowlist-only stream: unknown classes are rejected before instantiation.
+        try (ObjectInputStream in = new AntObjectInputStream(bytes)) {
+            in.readObject();
+        } catch (InvalidClassException e) {
+            logger.info(e.toString());
+            return e.toString();
+        }
 
         return "Are u ok?";
     }
@@ -74,10 +78,8 @@ public class Deserialize {
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
 
-        try {
-            AntObjectInputStream in = new AntObjectInputStream(bytes);  // throw InvalidClassException
+        try (AntObjectInputStream in = new AntObjectInputStream(bytes)) {  // throw InvalidClassException
             in.readObject();
-            in.close();
         } catch (InvalidClassException e) {
             logger.info(e.toString());
             return e.toString();
