@@ -18,7 +18,8 @@ import java.util.regex.Pattern;
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
-    private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
+    private static final Pattern HEADER_UNSAFE_PATTERN = Pattern.compile("[\\p{Cntrl}\\u0085\\u2028\\u2029]");
+    private static Logger logger =LoggerFactory.getLogger(SecurityUtil.class);
 
 
     /**
@@ -196,6 +197,21 @@ public class SecurityUtil {
         }
 
         return filepath;
+    }
+
+
+    /**
+     * Remove CR, LF and other control characters from a value before it is written to
+     * an HTTP response header, to prevent header injection / response splitting.
+     *
+     * @param value untrusted header value, may be null
+     * @return the value without control characters; null if the input is null
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        return HEADER_UNSAFE_PATTERN.matcher(value).replaceAll("");
     }
 
 
