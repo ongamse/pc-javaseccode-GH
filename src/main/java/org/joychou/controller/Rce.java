@@ -2,6 +2,16 @@ package org.joychou.controller;
 
 import groovy.lang.GroovyShell;
 import lombok.extern.slf4j.Slf4j;
+import org.codehaus.groovy.ast.expr.BinaryExpression;
+import org.codehaus.groovy.ast.expr.ConstantExpression;
+import org.codehaus.groovy.ast.expr.Expression;
+import org.codehaus.groovy.ast.stmt.BlockStatement;
+import org.codehaus.groovy.ast.stmt.ExpressionStatement;
+import org.codehaus.groovy.ast.stmt.Statement;
+import org.codehaus.groovy.control.CompilerConfiguration;
+import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
+import org.codehaus.groovy.syntax.Types;
+import org.joychou.security.SecurityUtil;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,6 +26,10 @@ import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.sql.DriverManager;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 
 /**
@@ -28,13 +42,45 @@ import java.sql.DriverManager;
 @RequestMapping("/rce")
 public class Rce {
 
+    /**
+     * Commands that the exec endpoints are allowed to run (no shell, argv only).
+     */
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(
+            Arrays.asList("whoami", "id", "uname", "date", "hostname", "pwd"));
+
+    /**
+     * Split a user supplied command line into argv. The command name must be in
+     * ALLOWED_COMMANDS and every argument must pass SecurityUtil.cmdFilter, so no
+     * shell metacharacters or whitespace tricks can reach the process.
+     *
+     * @return argv, or null if the command line is not allowed
+     */
+    private static String[] toAllowedArgv(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) {
+            return null;
+        }
+        String[] argv = cmd.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(argv[0])) {
+            return null;
+        }
+        for (int i = 1; i < argv.length; i++) {
+            if (SecurityUtil.cmdFilter(argv[i]) == null) {
+                return null;
+            }
+        }
+        return argv;
+    }
+
     @GetMapping("/runtime/exec")
     public String CommandExec(String cmd) {
-        Runtime run = Runtime.getRuntime();
         StringBuilder sb = new StringBuilder();
+        String[] argv = toAllowedArgv(cmd);
+        if (argv == null) {
+            return "Command not allowed!!";
+        }
 
         try {
-            Process p = run.exec(cmd);
+            Process p = new ProcessBuilder(argv).start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
             BufferedReader inBr = new BufferedReader(new InputStreamReader(in));
             String tmpStr;
@@ -65,8 +111,12 @@ public class Rce {
 
         StringBuilder sb = new StringBuilder();
 
+        String[] arrCmd = toAllowedArgv(cmd);
+        if (arrCmd == null) {
+            return "Command not allowed!!";
+        }
+
         try {
-            String[] arrCmd = {"/bin/sh", "-c", cmd};
             ProcessBuilder processBuilder = new ProcessBuilder(arrCmd);
             Process p = processBuilder.start();
             BufferedInputStream in = new BufferedInputStream(p.getInputStream());
@@ -95,10 +145,16 @@ public class Rce {
     @GetMapping("/jscmd")
     public void jsEngine(String jsurl) throws Exception{
         // js nashorn javascript ecmascript
+        // Only load scripts from allowlisted http(s) hosts, and pass the URL as a
+        // binding instead of splicing it into the script source.
+        String safeUrl = SecurityUtil.checkURL(jsurl);
+        if (safeUrl == null) {
+            throw new IllegalArgumentException("jsurl is not allowed");
+        }
         ScriptEngine engine = new ScriptEngineManager().getEngineByName("js");
         Bindings bindings = engine.getBindings(ScriptContext.ENGINE_SCOPE);
-        String cmd = String.format("load(\"%s\")", jsurl);
-        engine.eval(cmd, bindings);
+        bindings.put("safeJsUrl", safeUrl);
+        engine.eval("load(safeJsUrl)", bindings);
     }
 
 
@@ -126,7 +182,29 @@ public class Rce {
      */
     @GetMapping("groovy")
     public void groovyshell(String content) {
-        GroovyShell groovyShell = new GroovyShell();
+        // Untrusted scripts are limited to literals and arithmetic/comparison
+        // expressions: no method calls, property access, imports, closures or classes.
+        SecureASTCustomizer customizer = new SecureASTCustomizer();
+        customizer.setClosuresAllowed(false);
+        customizer.setMethodDefinitionAllowed(false);
+        customizer.setPackageAllowed(false);
+        customizer.setIndirectImportCheckEnabled(true);
+        customizer.setImportsWhitelist(new ArrayList<String>());
+        customizer.setStaticImportsWhitelist(new ArrayList<String>());
+        customizer.setStarImportsWhitelist(new ArrayList<String>());
+        customizer.setStaticStarImportsWhitelist(new ArrayList<String>());
+        customizer.setStatementsWhitelist(Arrays.<Class<? extends Statement>>asList(
+                BlockStatement.class, ExpressionStatement.class));
+        customizer.setExpressionsWhitelist(Arrays.<Class<? extends Expression>>asList(
+                ConstantExpression.class, BinaryExpression.class));
+        customizer.setTokensWhitelist(Arrays.asList(
+                Types.PLUS, Types.MINUS, Types.MULTIPLY, Types.DIVIDE, Types.MOD,
+                Types.COMPARE_EQUAL, Types.COMPARE_NOT_EQUAL, Types.COMPARE_LESS_THAN,
+                Types.COMPARE_LESS_THAN_EQUAL, Types.COMPARE_GREATER_THAN,
+                Types.COMPARE_GREATER_THAN_EQUAL, Types.LOGICAL_AND, Types.LOGICAL_OR));
+        CompilerConfiguration config = new CompilerConfiguration();
+        config.addCompilationCustomizers(customizer);
+        GroovyShell groovyShell = new GroovyShell(config);
         groovyShell.evaluate(content);
     }
 
