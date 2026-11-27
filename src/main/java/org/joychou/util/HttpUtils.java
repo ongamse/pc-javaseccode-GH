@@ -5,6 +5,7 @@ import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.HttpResponse;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.fluent.Request;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -12,6 +13,8 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
 import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
+import org.joychou.security.SecurityUtil;
+import org.joychou.security.ssrf.SSRFChecker;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.slf4j.Logger;
@@ -35,10 +38,29 @@ public class HttpUtils {
 
     private final static Logger logger = LoggerFactory.getLogger(HttpUtils.class);
 
+    private static final String SSRF_CHECK_FAILED = "[-] SSRF check failed";
+
+    /**
+     * Shared SSRF guard for every outbound request made by this class.
+     * The url must be http/https and its host must not resolve to an internal address
+     * (see {@link SSRFChecker#isInternalIpByUrl(String)}).
+     *
+     * @param url the url that needs to check
+     * @return true if the url may be requested, false otherwise
+     */
+    public static boolean isSafeUrl(String url) {
+        return url != null && SecurityUtil.isHttp(url) && SecurityUtil.checkSSRFWithoutRedirect(url);
+    }
+
     public static String commonHttpClient(String url) {
 
+        if (!isSafeUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         HttpClient client = new HttpClient();
         GetMethod method = new GetMethod(url);
+        // a redirect could point to an internal address that was not checked
+        method.setFollowRedirects(false);
 
         try {
             client.executeMethod(method); // send request
@@ -55,6 +77,9 @@ public class HttpUtils {
 
 
     public static String request(String url) {
+        if (!isSafeUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         try {
             return Request.Get(url).execute().returnContent().toString();
         } catch (Exception e) {
@@ -65,6 +90,10 @@ public class HttpUtils {
 
     public static String httpClient(String url) {
 
+        if (!isSafeUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
+
         StringBuilder result = new StringBuilder();
 
         try {
@@ -72,7 +101,7 @@ public class HttpUtils {
             CloseableHttpClient client = HttpClients.createDefault();
             HttpGet httpGet = new HttpGet(url);
             // set redirect enable false
-            // httpGet.setConfig(RequestConfig.custom().setRedirectsEnabled(false).build());
+            httpGet.setConfig(RequestConfig.custom().setRedirectsEnabled(false).build());
             HttpResponse httpResponse = client.execute(httpGet); // send request
             BufferedReader rd = new BufferedReader(new InputStreamReader(httpResponse.getEntity().getContent()));
 
@@ -90,9 +119,15 @@ public class HttpUtils {
 
 
     public static String URLConnection(String url) {
+        if (!isSafeUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         try {
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
+            if (urlConnection instanceof HttpURLConnection) {
+                ((HttpURLConnection) urlConnection).setInstanceFollowRedirects(false);
+            }
             BufferedReader in = new BufferedReader(new InputStreamReader(urlConnection.getInputStream())); //send request
             String inputLine;
             StringBuilder html = new StringBuilder();
@@ -114,11 +149,14 @@ public class HttpUtils {
      * UserAgent is Java/1.8.0_102.
      */
     public static String HttpURLConnection(String url) {
+        if (!isSafeUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         try {
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
             HttpURLConnection conn = (HttpURLConnection) urlConnection;
-//             conn.setInstanceFollowRedirects(false);
+            conn.setInstanceFollowRedirects(false);
 //             Many HttpURLConnection methods can send http request, such as getResponseCode, getHeaderField
             InputStream is = conn.getInputStream();  // send request
             BufferedReader in = new BufferedReader(new InputStreamReader(is));
@@ -143,9 +181,12 @@ public class HttpUtils {
      * @param url http request url
      */
     public static String Jsoup(String url) {
+        if (!isSafeUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         try {
             Document doc = Jsoup.connect(url)
-//                    .followRedirects(false)
+                    .followRedirects(false)
                     .timeout(3000)
                     .cookie("name", "joychou") // request cookies
                     .execute().parse();
@@ -162,8 +203,12 @@ public class HttpUtils {
      * UserAgent is <code>okhttp/2.5.0</code>.
      */
     public static String okhttp(String url) throws IOException {
+        if (!isSafeUrl(url)) {
+            throw new IOException(SSRF_CHECK_FAILED);
+        }
         OkHttpClient client = new OkHttpClient();
-//         client.setFollowRedirects(false);
+        client.setFollowRedirects(false);
+        client.setFollowSslRedirects(false);
         com.squareup.okhttp.Request ok_http = new com.squareup.okhttp.Request.Builder().url(url).build();
         return client.newCall(ok_http).execute().body().string();
     }
@@ -177,6 +222,10 @@ public class HttpUtils {
      * @param url http request url
      */
     public static void imageIO(String url) {
+        if (!isSafeUrl(url)) {
+            logger.error(SSRF_CHECK_FAILED);
+            return;
+        }
         try {
             URL u = new URL(url);
             // Only remote http(s) images; file:, jar: etc. would read local paths.
@@ -200,6 +249,10 @@ public class HttpUtils {
      * @param url http request url
      */
     public static void IOUtils(String url) {
+        if (!isSafeUrl(url)) {
+            logger.error(SSRF_CHECK_FAILED);
+            return;
+        }
         try {
             IOUtils.toByteArray(URI.create(url));
         } catch (IOException e) {
@@ -209,10 +262,14 @@ public class HttpUtils {
 
 
     public static String HttpAsyncClients(String url) {
+        if (!isSafeUrl(url)) {
+            return SSRF_CHECK_FAILED;
+        }
         CloseableHttpAsyncClient httpclient = HttpAsyncClients.createDefault();
         try {
             httpclient.start();
             final HttpGet request = new HttpGet(url);
+            request.setConfig(RequestConfig.custom().setRedirectsEnabled(false).build());
             Future<HttpResponse> future = httpclient.execute(request, null);
             HttpResponse response = future.get(6000, TimeUnit.MILLISECONDS);
             return EntityUtils.toString(response.getEntity());
