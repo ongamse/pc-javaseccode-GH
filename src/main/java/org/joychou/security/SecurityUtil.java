@@ -38,6 +38,21 @@ public class SecurityUtil {
 
 
     /**
+     * Remove CR and LF characters from a value that is written to an HTTP header,
+     * which prevents HTTP response splitting / header injection.
+     *
+     * @param value untrusted header value, may be null
+     * @return the value without CR/LF; null if the input is null
+     */
+    public static String stripCRLF(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replace("\r", "").replace("\n", "");
+    }
+
+
+    /**
      * Get http url host.
      *
      * @param url url
