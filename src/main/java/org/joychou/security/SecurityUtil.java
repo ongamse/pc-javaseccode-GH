@@ -12,12 +12,17 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
 public class SecurityUtil {
 
     private static final Pattern FILTER_PATTERN = Pattern.compile("^[a-zA-Z0-9_/\\.-]+$");
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<String>(
+            Arrays.asList("whoami", "id", "pwd", "uname", "uptime"));
     private static Logger logger = LoggerFactory.getLogger(SecurityUtil.class);
 
 
@@ -29,6 +34,21 @@ public class SecurityUtil {
      */
     public static boolean isHttp(String url) {
         return url.startsWith("http://") || url.startsWith("https://");
+    }
+
+
+    /**
+     * Remove CR and LF characters from a value that is written to an HTTP header,
+     * which prevents HTTP response splitting / header injection.
+     *
+     * @param value untrusted header value, may be null
+     * @return the value without CR/LF; null if the input is null
+     */
+    public static String stripCRLF(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replace("\r", "").replace("\n", "");
     }
 
 
@@ -205,6 +225,30 @@ public class SecurityUtil {
         }
 
         return input;
+    }
+
+
+    /**
+     * Split a user supplied command line into an argv array without any shell involved.
+     * The executable must be in a fixed allowlist and every token must pass {@link #cmdFilter(String)}.
+     *
+     * @param input command line, e.g. "uname -a"
+     * @return argv array, or null if the command is not allowed
+     */
+    public static String[] cmdArgv(String input) {
+        if (input == null) {
+            return null;
+        }
+        String[] parts = input.trim().split("\\s+");
+        if (!ALLOWED_COMMANDS.contains(parts[0])) {
+            return null;
+        }
+        for (String part : parts) {
+            if (cmdFilter(part) == null) {
+                return null;
+            }
+        }
+        return parts;
     }
 
 

@@ -12,7 +12,6 @@ import javax.servlet.http.HttpServletRequest;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InvalidClassException;
-import java.io.ObjectInputStream;
 import java.util.Base64;
 
 import static org.springframework.web.util.WebUtils.getCookie;
@@ -45,9 +44,12 @@ public class Deserialize {
         byte[] decoded = Base64.getDecoder().decode(rememberMe);
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
-        ObjectInputStream in = new ObjectInputStream(bytes);
-        in.readObject();
-        in.close();
+        try (AntObjectInputStream in = new AntObjectInputStream(bytes)) {  // allowlisted classes only
+            in.readObject();
+        } catch (InvalidClassException e) {
+            logger.info(e.toString());
+            return e.toString();
+        }
 
         return "Are u ok?";
     }
@@ -71,10 +73,8 @@ public class Deserialize {
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
 
-        try {
-            AntObjectInputStream in = new AntObjectInputStream(bytes);  // throw InvalidClassException
+        try (AntObjectInputStream in = new AntObjectInputStream(bytes)) {  // allowlisted classes only
             in.readObject();
-            in.close();
         } catch (InvalidClassException e) {
             logger.info(e.toString());
             return e.toString();
