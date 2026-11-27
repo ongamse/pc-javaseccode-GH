@@ -73,10 +73,8 @@ public class Deserialize {
 
         ByteArrayInputStream bytes = new ByteArrayInputStream(decoded);
 
-        try {
-            AntObjectInputStream in = new AntObjectInputStream(bytes);  // throw InvalidClassException
+        try (AntObjectInputStream in = new AntObjectInputStream(bytes)) {  // allowlisted classes only
             in.readObject();
-            in.close();
         } catch (InvalidClassException e) {
             logger.info(e.toString());
             return e.toString();
