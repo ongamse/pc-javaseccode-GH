@@ -7,9 +7,12 @@ import org.joychou.security.SecurityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
+import java.security.Principal;
 import java.sql.*;
 import java.util.List;
 
@@ -41,6 +44,36 @@ public class SQLI {
 
     @Resource
     private UserMapper userMapper;
+
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    private static class ForbiddenReferenceException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        ForbiddenReferenceException() {
+            super("Access to the requested record is not permitted.");
+        }
+    }
+
+    private static boolean isAdmin(HttpServletRequest request) {
+        return request.isUserInRole("ADMIN");
+    }
+
+    /**
+     * Authorization check for request-supplied user references: only the authenticated
+     * owner of the record (or an administrator) may query it. Fails closed.
+     */
+    private static void checkOwnership(HttpServletRequest request, String requestedUsername) {
+        Principal principal = request.getUserPrincipal();
+        if (principal == null || principal.getName() == null) {
+            throw new ForbiddenReferenceException();
+        }
+        if (isAdmin(request)) {
+            return;
+        }
+        if (requestedUsername == null || !principal.getName().equals(requestedUsername)) {
+            throw new ForbiddenReferenceException();
+        }
+    }
 
 
     /**
@@ -93,8 +126,9 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/jdbc/sec?username=joychou">http://localhost:8080/sqli/jdbc/sec?username=joychou</a>
      */
     @RequestMapping("/jdbc/sec")
-    public String jdbc_sqli_sec(@RequestParam("username") String username) {
+    public String jdbc_sqli_sec(@RequestParam("username") String username, HttpServletRequest request) {
 
+        checkOwnership(request, username);
         StringBuilder result = new StringBuilder();
         try {
             Class.forName(driver);
@@ -181,7 +215,8 @@ public class SQLI {
      * <p>select * from users where username = 'joychou' or '1'='1' </p>
      */
     @GetMapping("/mybatis/vuln01")
-    public List<User> mybatisVuln01(@RequestParam("username") String username) {
+    public List<User> mybatisVuln01(@RequestParam("username") String username, HttpServletRequest request) {
+        checkOwnership(request, username);
         return userMapper.findByUserNameVuln01(username);
     }
 
@@ -191,7 +226,8 @@ public class SQLI {
      * <p>select * from users where username like '%joychou' or '1'='1%' </p>
      */
     @GetMapping("/mybatis/vuln02")
-    public List<User> mybatisVuln02(@RequestParam("username") String username) {
+    public List<User> mybatisVuln02(@RequestParam("username") String username, HttpServletRequest request) {
+        checkOwnership(request, username);
         return userMapper.findByUserNameVuln02(username);
     }
 
@@ -211,7 +247,8 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec01?username=joychou">http://localhost:8080/sqli/mybatis/sec01?username=joychou</a>
      */
     @GetMapping("/mybatis/sec01")
-    public User mybatisSec01(@RequestParam("username") String username) {
+    public User mybatisSec01(@RequestParam("username") String username, HttpServletRequest request) {
+        checkOwnership(request, username);
         return userMapper.findByUserName(username);
     }
 
@@ -220,8 +257,13 @@ public class SQLI {
      * <a href="http://localhost:8080/sqli/mybatis/sec02?id=1">http://localhost:8080/sqli/mybatis/sec02?id=1</a>
      */
     @GetMapping("/mybatis/sec02")
-    public User mybatisSec02(@RequestParam("id") Integer id) {
-        return userMapper.findById(id);
+    public User mybatisSec02(@RequestParam("id") Integer id, HttpServletRequest request) {
+        User found = userMapper.findById(id);
+        // Only the owner of the record (or an administrator) may read it; fail closed otherwise.
+        if (!isAdmin(request)) {
+            checkOwnership(request, found == null ? null : found.getUsername());
+        }
+        return found;
     }
 
 
