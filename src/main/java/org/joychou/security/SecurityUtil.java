@@ -12,6 +12,9 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
@@ -28,7 +31,7 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
+        return url != null && (url.startsWith("http://") || url.startsWith("https://"));
     }
 
 
@@ -41,8 +44,15 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
-        } catch (URISyntaxException e) {
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            // Only http/https urls without user info have a host we are willing to reason about.
+            if (host == null || uri.getUserInfo() != null || scheme == null
+                    || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+                return "";
+            }
+            return host.toLowerCase();
+        } catch (URISyntaxException | NullPointerException e) {
             return "";
         }
     }
@@ -98,6 +108,65 @@ public class SecurityUtil {
             logger.error(e.toString());
             return null;
         }
+    }
+
+
+    /**
+     * Validate a CORS request origin. The value must be a bare http/https origin
+     * (<code>scheme://host[:port]</code>: no user info, path, query or fragment) whose host is
+     * allowed by {@link #checkURL(String)}. Fails closed.
+     *
+     * @param origin value of the Origin request header
+     * @return the original origin if it is trusted; otherwise null
+     */
+    public static String checkCorsOrigin(String origin) {
+        if (origin == null || checkURL(origin) == null) {
+            return null;
+        }
+        try {
+            URI uri = new URI(origin);
+            String path = uri.getRawPath();
+            if (uri.getRawUserInfo() != null || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null || (path != null && !path.isEmpty())) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return origin;
+    }
+
+
+    /**
+     * Validate a redirect target. Only an absolute http/https url whose host is allowed by
+     * {@link #checkURL(String)} (strict {@link URI} parsing: no user info, no backslashes,
+     * no control characters) or a same-site absolute path such as <code>/a/b?c=d</code> is accepted.
+     * Scheme-relative (<code>//host</code>) and backslash forms are rejected. Fails closed.
+     *
+     * @param url the redirect target supplied by the user
+     * @return the original url if it is a safe redirect target; otherwise null
+     */
+    public static String checkRedirectURL(String url) {
+        if (url == null || url.isEmpty()) {
+            return null;
+        }
+
+        if (url.charAt(0) == '/') {
+            if (url.length() > 1 && (url.charAt(1) == '/' || url.charAt(1) == '\\')) {
+                return null;
+            }
+            try {
+                URI uri = new URI(url);
+                if (uri.getScheme() != null || uri.getRawAuthority() != null || uri.getHost() != null) {
+                    return null;
+                }
+            } catch (URISyntaxException e) {
+                return null;
+            }
+            return url;
+        }
+
+        return checkURL(url);
     }
 
 
@@ -200,11 +269,54 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(
+            Arrays.asList("whoami", "id", "date", "hostname", "uname", "pwd", "uptime"));
+    private static final Set<String> ALLOWED_COMMAND_ARGS = new HashSet<>(
+            Arrays.asList("-a", "-u", "-n", "-g"));
+    private static final Pattern HOST_PATTERN = Pattern.compile("^[a-zA-Z0-9.-]+(:[0-9]{1,5})?$");
+
+
+    /**
+     * Parse a user supplied command into an argv array without involving a shell.
+     * Only allowlisted executables with allowlisted flags are accepted.
+     *
+     * @param input user supplied command line, e.g. "uname -a"
+     * @return argv array for ProcessBuilder / Runtime.exec(String[]), or null if not allowed
+     */
+    public static String[] cmdAllowlist(String input) {
+        if (input == null) {
+            return null;
+        }
+        String[] tokens = input.trim().split("\\s+");
+        if (tokens.length == 0 || tokens.length > 2 || !ALLOWED_COMMANDS.contains(tokens[0])) {
+            return null;
+        }
+        if (tokens.length == 2 && !ALLOWED_COMMAND_ARGS.contains(tokens[1])) {
+            return null;
+        }
+        return tokens;
+    }
+
+
+    /**
+     * Validate a host[:port] value (e.g. a Host header) before it is used as a process argument.
+     *
+     * @param host host header value
+     * @return the host if it is a plain host[:port], otherwise null
+     */
+    public static String hostFilter(String host) {
+        if (host == null || !HOST_PATTERN.matcher(host).matches() || host.startsWith("-")) {
+            return null;
+        }
+        return host;
     }
 
 

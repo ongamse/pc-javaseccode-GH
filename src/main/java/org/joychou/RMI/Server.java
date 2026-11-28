@@ -1,7 +1,11 @@
 package org.joychou.RMI;
 
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
+import java.rmi.server.RMIServerSocketFactory;
 import java.rmi.server.UnicastRemoteObject;
 
 
@@ -15,9 +19,18 @@ public class Server implements Hello {
     public static void main(String args[]) {
 
         try {
+            // Only listen on the loopback interface so the registry and the exported object are
+            // not reachable from remote attackers; stubs must advertise the loopback address too.
+            System.setProperty("java.rmi.server.hostname", "127.0.0.1");
+            RMIServerSocketFactory loopbackFactory = new RMIServerSocketFactory() {
+                @Override
+                public ServerSocket createServerSocket(int port) throws IOException {
+                    return new ServerSocket(port, 50, InetAddress.getLoopbackAddress());
+                }
+            };
             Server obj = new Server();
-            Hello stub = (Hello) UnicastRemoteObject.exportObject(obj, 0);
-            LocateRegistry.createRegistry(1099);
+            Hello stub = (Hello) UnicastRemoteObject.exportObject(obj, 0, null, loopbackFactory);
+            LocateRegistry.createRegistry(1099, null, loopbackFactory);
             Registry registry = LocateRegistry.getRegistry();
             registry.bind("Hello", stub);
             System.out.println("绑定1099端口成功");

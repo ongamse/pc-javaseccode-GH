@@ -4,6 +4,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * RASP：Hook java/io/ObjectInputStream类的resolveClass方法
@@ -36,17 +39,45 @@ public class AntObjectInputStream extends ObjectInputStream {
         // Deserialize class name: org.joychou.security.AntObjectInputStream$MyObject
         logger.info("Deserialize class name: " + className);
 
-        String[] denyClasses = {"java.net.InetAddress",
-                                "org.apache.commons.collections.Transformer",
-                                "org.apache.commons.collections.functors"};
-
-        for (String denyClass : denyClasses) {
-            if (className.startsWith(denyClass)) {
-                throw new InvalidClassException("Unauthorized deserialization attempt", className);
-            }
+        if (!isAllowed(className)) {
+            throw new InvalidClassException("Unauthorized deserialization attempt", className);
         }
 
         return super.resolveClass(desc);
+    }
+
+    /**
+     * Allowlist (deny by default): only these exact class names may be deserialized.
+     */
+    private static final Set<String> ALLOWED_CLASSES = new HashSet<String>(Arrays.asList(
+            "org.joychou.security.AntObjectInputStream$MyObject",
+            "org.joychou.dao.User",
+            "java.lang.String",
+            "java.lang.Number",
+            "java.lang.Integer",
+            "java.lang.Long",
+            "java.lang.Boolean"
+    ));
+
+    private static boolean isAllowed(String className) {
+        // Array class names look like "[Ljava.lang.String;" or "[I"; validate the element type.
+        String name = className;
+        int dims = 0;
+        while (name.startsWith("[")) {
+            name = name.substring(1);
+            dims++;
+        }
+        if (dims > 0) {
+            if (name.length() == 1) {
+                return "BCDFIJSZ".indexOf(name.charAt(0)) >= 0;   // primitive element type
+            }
+            if (name.startsWith("L") && name.endsWith(";")) {
+                name = name.substring(1, name.length() - 1);
+            } else {
+                return false;
+            }
+        }
+        return ALLOWED_CLASSES.contains(name);
     }
 
     public static void main(String args[]) throws Exception{

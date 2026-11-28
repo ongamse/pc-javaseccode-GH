@@ -3,6 +3,7 @@ package org.joychou.util;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import java.io.*;
+import java.util.regex.Pattern;
 
 import com.google.common.base.Preconditions;
 import org.springframework.web.util.HtmlUtils;
@@ -27,8 +28,51 @@ public class WebUtils {
     }
 
 
+    // A JSONP callback must be a plain JavaScript identifier path such as "cb" or "window.cb".
+    private static final Pattern JSONP_CALLBACK_PATTERN =
+            Pattern.compile("^[a-zA-Z_$][a-zA-Z0-9_$]{0,63}(\\.[a-zA-Z_$][a-zA-Z0-9_$]{0,63}){0,3}$");
+
+    /**
+     * Check a JSONP callback name against an allowlist pattern (JS context validation).
+     *
+     * @param callback callback name from the request
+     * @return true if the callback is a safe JavaScript identifier path
+     */
+    public static boolean isValidJsonpCallback(String callback) {
+        return callback != null && JSONP_CALLBACK_PATTERN.matcher(callback).matches();
+    }
+
+    /**
+     * Escape untrusted data for the HTML body context. Null-safe (null stays null).
+     */
+    public static String htmlEscape(String input) {
+        return HtmlUtils.htmlEscape(input);
+    }
+
+    /**
+     * Neutralize untrusted data before it is used as an HTTP response header value (CWE-113).
+     * Removes CR, LF and every other ISO control character so a value cannot terminate the
+     * header line or inject extra headers / a response body. Null-safe (null stays null).
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (!Character.isISOControl(c) && c != '\u2028' && c != '\u2029') {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
     public static String json2Jsonp(String callback, String jsonStr) {
-        return HtmlUtils.htmlEscape(callback) + "(" + jsonStr + ")";
+        if (!isValidJsonpCallback(callback)) {
+            return "error";
+        }
+        return callback + "(" + jsonStr + ")";
     }
 
 
