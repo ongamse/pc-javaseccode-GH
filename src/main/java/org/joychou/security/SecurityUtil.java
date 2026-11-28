@@ -12,6 +12,9 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 
@@ -200,11 +203,54 @@ public class SecurityUtil {
 
 
     public static String cmdFilter(String input) {
-        if (!FILTER_PATTERN.matcher(input).matches()) {
+        if (input == null || !FILTER_PATTERN.matcher(input).matches()) {
             return null;
         }
 
         return input;
+    }
+
+
+    private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(
+            Arrays.asList("whoami", "id", "date", "hostname", "uname", "pwd", "uptime"));
+    private static final Set<String> ALLOWED_COMMAND_ARGS = new HashSet<>(
+            Arrays.asList("-a", "-u", "-n", "-g"));
+    private static final Pattern HOST_PATTERN = Pattern.compile("^[a-zA-Z0-9.-]+(:[0-9]{1,5})?$");
+
+
+    /**
+     * Parse a user supplied command into an argv array without involving a shell.
+     * Only allowlisted executables with allowlisted flags are accepted.
+     *
+     * @param input user supplied command line, e.g. "uname -a"
+     * @return argv array for ProcessBuilder / Runtime.exec(String[]), or null if not allowed
+     */
+    public static String[] cmdAllowlist(String input) {
+        if (input == null) {
+            return null;
+        }
+        String[] tokens = input.trim().split("\\s+");
+        if (tokens.length == 0 || tokens.length > 2 || !ALLOWED_COMMANDS.contains(tokens[0])) {
+            return null;
+        }
+        if (tokens.length == 2 && !ALLOWED_COMMAND_ARGS.contains(tokens[1])) {
+            return null;
+        }
+        return tokens;
+    }
+
+
+    /**
+     * Validate a host[:port] value (e.g. a Host header) before it is used as a process argument.
+     *
+     * @param host host header value
+     * @return the host if it is a plain host[:port], otherwise null
+     */
+    public static String hostFilter(String host) {
+        if (host == null || !HOST_PATTERN.matcher(host).matches() || host.startsWith("-")) {
+            return null;
+        }
+        return host;
     }
 
 
