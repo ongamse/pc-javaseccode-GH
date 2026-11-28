@@ -3,6 +3,7 @@ package org.joychou.util;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import java.io.*;
+import java.util.regex.Pattern;
 
 import com.google.common.base.Preconditions;
 import org.springframework.web.util.HtmlUtils;
@@ -27,8 +28,32 @@ public class WebUtils {
     }
 
 
+    // A JSONP callback must be a plain JavaScript identifier path such as "cb" or "window.cb".
+    private static final Pattern JSONP_CALLBACK_PATTERN =
+            Pattern.compile("^[a-zA-Z_$][a-zA-Z0-9_$]{0,63}(\\.[a-zA-Z_$][a-zA-Z0-9_$]{0,63}){0,3}$");
+
+    /**
+     * Check a JSONP callback name against an allowlist pattern (JS context validation).
+     *
+     * @param callback callback name from the request
+     * @return true if the callback is a safe JavaScript identifier path
+     */
+    public static boolean isValidJsonpCallback(String callback) {
+        return callback != null && JSONP_CALLBACK_PATTERN.matcher(callback).matches();
+    }
+
+    /**
+     * Escape untrusted data for the HTML body context. Null-safe (null stays null).
+     */
+    public static String htmlEscape(String input) {
+        return HtmlUtils.htmlEscape(input);
+    }
+
     public static String json2Jsonp(String callback, String jsonStr) {
-        return HtmlUtils.htmlEscape(callback) + "(" + jsonStr + ")";
+        if (!isValidJsonpCallback(callback)) {
+            return "error";
+        }
+        return callback + "(" + jsonStr + ")";
     }
 
 
