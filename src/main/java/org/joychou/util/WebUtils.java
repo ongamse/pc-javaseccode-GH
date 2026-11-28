@@ -49,6 +49,25 @@ public class WebUtils {
         return HtmlUtils.htmlEscape(input);
     }
 
+    /**
+     * Neutralize untrusted data before it is used as an HTTP response header value (CWE-113).
+     * Removes CR, LF and every other ISO control character so a value cannot terminate the
+     * header line or inject extra headers / a response body. Null-safe (null stays null).
+     */
+    public static String sanitizeHeaderValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (!Character.isISOControl(c) && c != '\u2028' && c != '\u2029') {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
     public static String json2Jsonp(String callback, String jsonStr) {
         if (!isValidJsonpCallback(callback)) {
             return "error";
