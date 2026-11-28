@@ -112,6 +112,32 @@ public class SecurityUtil {
 
 
     /**
+     * Validate a CORS request origin. The value must be a bare http/https origin
+     * (<code>scheme://host[:port]</code>: no user info, path, query or fragment) whose host is
+     * allowed by {@link #checkURL(String)}. Fails closed.
+     *
+     * @param origin value of the Origin request header
+     * @return the original origin if it is trusted; otherwise null
+     */
+    public static String checkCorsOrigin(String origin) {
+        if (origin == null || checkURL(origin) == null) {
+            return null;
+        }
+        try {
+            URI uri = new URI(origin);
+            String path = uri.getRawPath();
+            if (uri.getRawUserInfo() != null || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null || (path != null && !path.isEmpty())) {
+                return null;
+            }
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        return origin;
+    }
+
+
+    /**
      * Validate a redirect target. Only an absolute http/https url whose host is allowed by
      * {@link #checkURL(String)} (strict {@link URI} parsing: no user info, no backslashes,
      * no control characters) or a same-site absolute path such as <code>/a/b?c=d</code> is accepted.
