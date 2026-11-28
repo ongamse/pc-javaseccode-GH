@@ -31,7 +31,7 @@ public class SecurityUtil {
      * @return true or false
      */
     public static boolean isHttp(String url) {
-        return url.startsWith("http://") || url.startsWith("https://");
+        return url != null && (url.startsWith("http://") || url.startsWith("https://"));
     }
 
 
@@ -44,8 +44,15 @@ public class SecurityUtil {
     public static String gethost(String url) {
         try {
             URI uri = new URI(url);
-            return uri.getHost().toLowerCase();
-        } catch (URISyntaxException e) {
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            // Only http/https urls without user info have a host we are willing to reason about.
+            if (host == null || uri.getUserInfo() != null || scheme == null
+                    || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+                return "";
+            }
+            return host.toLowerCase();
+        } catch (URISyntaxException | NullPointerException e) {
             return "";
         }
     }
